@@ -1,5 +1,8 @@
 import pandas as pd
 
+opioids = pd.read_csv("dataset/opioids.csv")
+overdose = pd.read_csv("dataset/overdoses.csv", thousands = ',')
+prescriber = pd.read_csv("dataset/prescriber-info.csv")
 
 look_up = {
     ".": "",
@@ -15,17 +18,26 @@ look_up = {
     ",": "  "
 }
 
+# Hate to do hard coding but trying to save as many as data points as I can here,,,
 more_look_up = {
     "M D": "MD",
     "M  D": "MD",
     "MD ": "MD",
+    "M. D.": "MD",
+    "M. D.,": "MD",
+    "M,D, ": "MD",
     "D O": "DO",
+    "D,O ": "DO",
     "O D": "OD",
+    "O D ": "OD",
+    "O D  PS": "OD",
     "N P": "NP",
     "P A": "PA",
+    "P,A, ": "PA",
     "PA C": "PA",
     "D P M": "DPM",
     "D D S": "DDS",
+    "D. D. S.": "DDS",
     "DD  S": "DDS",
     "D M D": "DMD",
     "PH D": "PHD",
@@ -34,13 +46,16 @@ more_look_up = {
     "NURSE PRACTITIONER": "NP",
     "FAMILY NURSE PRACTIT": "NP",
     "MEDICAL DOCTOR": "MD",
-    "MD IN TRAINING": "MD"
+    "MD IN TRAINING": "MD",
+    "OPTOMETRIST": "OD"
 }
 
 
 
 
-def plot_us_map(df, state, code, z, title='Overdose Deaths Per Capita'):
+def plot_us_map(df, state, code, z,
+                title='Overdose Deaths Per Capita',
+                colorbar_title=None):
 
     scl = [ [ 0.0, 'rgb(242,240,247)' ],
             [ 0.2, 'rgb(218,218,235)' ],
@@ -66,12 +81,14 @@ def plot_us_map(df, state, code, z, title='Overdose Deaths Per Capita'):
             line=dict(
                 color='rgb(255,255,255)',
                 width=2
-            ))
+            )),
+        colorbar = dict(
+        title=colorbar_title)
     ) ]
 
     layout = dict(
+        title=title,
         geo=dict(
-            title=title,
             scope='usa',
             projection=dict(type='albers usa'),
             showlakes=False,
@@ -134,6 +151,55 @@ def create_credential_variables(credentials_clean):
     })
 
     return df
+
+
+def clean_creds(credentials = prescriber[ 'Credentials' ]):
+    credentials_clean = clean_credentials(credentials)
+    credentials_vars = create_credential_variables(credentials_clean)
+    credentials_vars[ 'Other' ] = (credentials_vars.sum(axis=1) == 0).astype(int)
+    return credentials_vars
+
+
+opioids_columns = ['FENTANYL',
+     'HYDROCODONE.ACETAMINOPHEN',
+     'HYDROMORPHONE.HCL',
+     'METHADONE.HCL',
+     'MORPHINE.SULFATE',
+     'OXYCODONE.HCL',
+     'TRAMADOL.HCL',
+     'ACETAMINOPHEN.CODEINE',
+     'OXYCODONE.ACETAMINOPHEN',
+     'MORPHINE.SULFATE.ER',
+     'OXYCONTIN',
+     'OXYBUTYNIN.CHLORIDE',
+     'OXYBUTYNIN.CHLORIDE.ER',
+     'ACETAMINOPHEN.CODEINE',
+     'OXYCODONE.ACETAMINOPHEN',
+     'MORPHINE.SULFATE.ER',
+     'OXYCONTIN',
+     'OXYBUTYNIN.CHLORIDE',
+     'OXYBUTYNIN.CHLORIDE.ER']
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
