@@ -29,6 +29,7 @@ def load_dataset():
     return opioids, overdose, prescriber
 
 
+
 def num_cat_names(prescriber):
     credentials_vars = utils.clean_creds(prescriber[ 'Credentials' ])
     logging.info("Credential column label is binarized")
@@ -80,7 +81,7 @@ def prepare_num(prescriber, op_names, nonop_names, add_total=True):
     return op, nonop, transformed, param
 
 
-def split_data(labels, features, dest_path="dataset/datasets.pickle"):
+def split_data(labels, features, dest_path="dataset/datasets_clean.pickle"):
     X_train, X_test, y_train, y_test = train_test_split(
         features, labels, test_size=0.15, random_state=42)
     logging.info("Training set has {} samples.".format(X_train.shape[ 0 ]))
@@ -98,6 +99,7 @@ def split_data(labels, features, dest_path="dataset/datasets.pickle"):
 
 def main():
     opioids, overdose, prescriber = load_dataset()
+    prescriber['Specialty'] = utils.clean_specialties(prescriber['Specialty'])
     y, op_names, nonop_names, cat_attribs, credentials_vars = num_cat_names(prescriber)
     cat_prepared = prepare_cat(prescriber, cat_attribs)
     op, nonop, transformed, param = prepare_num(prescriber, op_names, nonop_names, add_total=True)

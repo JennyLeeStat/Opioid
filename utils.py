@@ -1,4 +1,15 @@
 import pandas as pd
+import os
+import sys
+import urllib
+import logging
+import zipfile
+
+logging.basicConfig(
+    format= '%(levelname)s %(message)s',
+    stream=sys.stdout, level=logging.INFO)
+
+
 
 opioids = pd.read_csv("dataset/opioids.csv")
 overdose = pd.read_csv("dataset/overdoses.csv", thousands = ',')
@@ -50,7 +61,61 @@ more_look_up = {
     "OPTOMETRIST": "OD"
 }
 
+specialty_lookup = {
+    'Clinic/Center': 'Other',
+    'Preferred Provider Organization': 'Other',
+    'Unknown Physician Specialty Code': 'Other',
+    'Unknown Supplier/Provider': 'Other',
+    'Colorectal Surgery (formerly proctology)': 'Colon & Rectal Surgery',
+    'Hematology/Oncology': 'Hematology',
+    'Medical Genetics, Ph.D. Medical Genetics': 'Medical Genetics',
+    'Maxillofacial Surgery': 'Oral & Maxillofacial Surgery',
+    'Orthopaedic Surgery': 'Orthopedic Surgery',
+    'Interventional Pain Management': 'Pain Management',
+    'Plastic Surgery': 'Plastic and Reconstructive Surgery',
+    'Psychiatry & Neurology': 'Psychiatry',
+    'Psychologist (billing independently)': 'Psychologist',
+    'Specialist/Technologist': 'Specialist',
+    'Thoracic Surgery (Cardiothoracic Vascular Surgery)': 'Thoracic Surgery',
+    'Hospital (Dmercs Only)': 'Other',
+    'Rehabilitation Agency': 'Physical Medicine and Rehabilitation',
+    'General Practice': 'Family Practice',
+    'Family Medicine': 'Family Practice',
+    'Surgery': 'General Surgery',
+    'Licensed Practical Nurse': 'Nurse Practitioner'
 
+}
+def download_and_decompress(url, dest_dir):
+
+    if not os.path.exists(dest_dir):
+        os.mkdir(dest_dir)
+
+    filename = url.split('/')[ -1 ]
+    filepath = os.path.join(dest_dir, filename)
+    uncomp_filedir = filename.split('.')[ 0 ]
+    uncomp_filepath = os.path.join(dest_dir, uncomp_filedir)
+
+    def _progress(count, block_size, total_size):
+        sys.stdout.write('\r>> Downloading %s %.1f%%' % (
+            filename, float(count * block_size) / float(total_size) * 100.0))
+        sys.stdout.flush()
+
+    if not os.path.isfile(filepath):
+        filepath, _ = urllib.request.urlretrieve(url, filepath,
+                                                 reporthook=_progress)
+        statinfo = os.stat(filepath)
+        logging.info('Successfully downloaded {}'.format(filename))
+        logging.info('{} bytes.'.format(statinfo.st_size))
+
+    if not os.path.isfile(filepath):
+        logging.info("Uncompressing {}".format(filename))
+        zipfile.ZipFile(filepath, 'r').extractall(dest_dir)
+        logging.info(uncomp_filedir + ' successfully uncompressed')
+        print()
+
+    logging.info("Data set {}".format(filename))
+    logging.info("from url: {}".format(url))
+    logging.info("successfully downloaded and uncompressed!")
 
 
 def plot_us_map(df, state, code, z,
@@ -98,6 +163,14 @@ def plot_us_map(df, state, code, z,
     fig = dict(data=data, layout=layout)
     return fig
 
+def clean_specialties(specialties):
+    specialties_clean = []
+    for s in specialties:
+        if s in specialty_lookup.keys():
+            s = specialty_lookup[s]
+        specialties_clean.append(s)
+    logging("Finished cleaning Specialty feature")
+    return pd.Series(specialties_clean)
 
 def clean_credentials(credentials):
     credentials_clean = [ ]
