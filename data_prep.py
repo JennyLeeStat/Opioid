@@ -9,7 +9,6 @@ logging.basicConfig(
     stream=sys.stdout, level=logging.INFO)
 
 import warnings
-
 warnings.filterwarnings('ignore')
 
 import utils
@@ -18,9 +17,10 @@ drugs_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statis
 npi_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_NPI_15.zip"
 st_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_Drug_St_15.zip"
 ntl_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_Drug_Ntl_15.zip"
+
 dest_dir = "dataset"
 chunk_size = 100000
-n_other_drugs = 1000
+n_other_drugs = 50
 n_batches_to_try = 10000
 random_state = 42
 
@@ -64,7 +64,7 @@ def prepare_npi(npi_url, dropna=True, add_new_features=True):
     if dropna:
         npi = npi.dropna(subset=[ 'op_claims', 'op_day_supply', 'op_bene_count', 'op_rate' ])
 
-    # chang datatype of zipcode from float to category
+    # change the data type of zipcode from float to category
     npi[ 'zipcode' ] = npi[ 'zipcode' ].fillna(0).astype('int').astype('category')
 
     # omit the non-US samples and drop country feature
@@ -107,7 +107,7 @@ def prepare_npi(npi_url, dropna=True, add_new_features=True):
 def get_drug_name_dict(threshold=500):
     """
 
-    :param threshold: drop drug names if number of prescribers is smaller than threshold
+    :param threshold: drug names are dropped if number of prescribers is smaller than threshold
     :return: dictionary of generic drug names with five keys 
             - opioid, hrm, antibiotic, antipsych, others
     """
@@ -144,11 +144,12 @@ def get_drug_name_dict(threshold=500):
 def get_drug_names(ntl, drug_name_dict, n_other_drugs=n_other_drugs, random_state=random_state):
     """
     flatten drug_name_dict to get non_opioid names and opioid names lists 
-    :param ntl: drug summary ntl summary which contains drug names columns 
-    :param drug_name_dict: 
+    :param ntl: drug ntl summary table which contains drug names columns 
+    :param drug_name_dict: return from get_drug_names_dict()
     :param n_other_drugs: how many ~[op, hrm, antibiotic, antipsych] drugs will be included 
     :return: two lists - op_names and non_op_names
     """
+
     ntl_small = ntl.sort_values(by='Number of Prescribers', ascending=False)
     ntl_small = ntl_small.loc[ :, [ 'Generic Name', 'Number of Prescribers' ] ]
     ntl_small[ 'Generic Name' ] = utils.clean_txt(ntl_small[ 'Generic Name' ])
