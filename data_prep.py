@@ -21,6 +21,7 @@ def prepare_npi(npi_url, dropna=True, add_new_features=True):
     utils.download_and_decompress(npi_url, dest_dir)
     filename = dest_dir + "/" + npi_url.split("/")[-1].split(".")[0]+".txt"
     npi = pd.read_table(filename)
+    #TODO: add verbose flag, and print out preprocessing progress
 
     # =====Feature selection =====
     cols_to_keep = ['npi', 'nppes_provider_gender', 'nppes_provider_zip5',
@@ -93,10 +94,18 @@ def prepare_npi(npi_url, dropna=True, add_new_features=True):
 
     return npi
 
-def get_drug_name_dict():
+
+def get_drug_name_dict(threshold=500):
+    """
+
+    :param threshold: drop names if prescriber number is smaller than threshold
+    :return: dictionary of drug names by five keys 
+    """
     utils.download_and_decompress(ntl_url, dest_dir)
     filename = dest_dir + "/" + ntl_url.split("/")[ -1 ].split(".")[ 0 ] + ".xlsx"
     ntl = pd.read_excel(filename, sheetname=2, header=1)
+    ntl = ntl.loc[ ntl[ 'Number of Prescribers' ] != '  ' ]
+    ntl[ 'Number of Prescribers' ] = pd.to_numeric(ntl[ 'Number of Prescribers' ])
 
     drug_name_dict = {}
     drug_categories = [ 'Opioid Drug Flag',
@@ -108,19 +117,20 @@ def get_drug_name_dict():
         if key == 'others':
             generic_names = ntl.loc[ (ntl[ 'Opioid Drug Flag' ] == 'N ') \
                                      & (ntl[ 'Antibiotic Drug Flag' ] == 'N ') \
-                                     & (ntl[ 'High Risk Medication (HRM) Drug Flag' ] == 'N ')\
-                                     & (ntl[ 'Antipsychotic Drug Flag' ] == 'N '),
+                                     & (ntl[ 'High Risk Medication (HRM) Drug Flag' ] == 'N ') \
+                                     & (ntl[ 'Antipsychotic Drug Flag' ] == 'N ') \
+                                     & (ntl[ 'Number of Prescribers' ] > threshold),
                                      'Generic Name' ]
         else:
-            generic_names = ntl.loc[ ntl[ key ] == 'Y ', 'Generic Name' ]
+            generic_names = ntl.loc[ (ntl[ key ] == 'Y ') \
+                                     & (ntl[ 'Number of Prescribers' ] > threshold),
+                                     'Generic Name' ]
         generic_names = utils.clean_txt(generic_names).unique()
         drug_name_dict[ key ] = list(generic_names)
 
     return ntl, drug_name_dict
 
 def get_drug_names(ntl, drug_name_dict, size_others=150):
-    # omit rows with nan number of prescribers
-    ntl = ntl.loc[ ntl[ 'Number of Prescribers' ] != '  ' ]
     ntl_small = ntl.sort_values(by='Number of Prescribers', ascending=False)
     ntl_small = ntl_small.loc[ :, [ 'Generic Name', 'Number of Prescribers' ] ]
     ntl_small[ 'Generic Name' ] = utils.clean_txt(ntl_small[ 'Generic Name' ])
@@ -129,8 +139,9 @@ def get_drug_names(ntl, drug_name_dict, size_others=150):
     ntl_others = ntl_small.loc[ ntl_small[ 'Generic Name' ].isin(other_names), : ]
     ntl_others[ 'Number of Prescribers' ] = ntl_others[ 'Number of Prescribers' ] / ntl_others[
         'Number of Prescribers' ].sum()
-    ntl_others[ 'Number of Prescribers' ] = pd.to_numeric(ntl_others[ 'Number of Prescribers' ])
+
     # randomly sampling subset of other drug names according to its frequency
+    np.random.RandomState(seed=42)
     others_picked = np.random.choice(ntl_others['Generic Name'],
                                      size=size_others,
                                      replace=False,
@@ -150,17 +161,22 @@ def download_drugs():
     drugs = pd.read_table(filename, iterator=True)
     return drugs
 
-def clean_drug_chunks(drugs, npi):
+
+def clean_drug_chunks(drugs, npi, non_op_names, chunk_size=100000):
     small = drugs.get_chunk(chunk_size)
     small[ 'avg_day_supply' ] = small[ 'total_day_supply' ] / small[ 'bene_count' ]
     small[ 'generic_name' ] = utils.clean_txt(small[ 'generic_name' ])
     cols_to_keep = [ 'npi', 'generic_name', 'avg_day_supply' ]
     small = small.loc[ :, cols_to_keep ]
+    small = small.set_index('npi')
     wide_table = pd.crosstab(index=small.index,
                              columns=small[ 'generic_name' ],
                              values=small[ 'avg_day_supply' ],
                              aggfunc=np.mean)
+    wide_table = wide_table.loc[ :, non_op_names ]
     wide_table = wide_table.fillna(0)
+    wide_table.index.name = 'npi'
+
     return wide_table
 
 
@@ -174,6 +190,7 @@ def main():
     npi = prepare_npi(npi_url, dropna=True, add_new_features=True)
     ntl, drug_name_dict = get_drug_name_dict()
     non_op_names, op_names = get_drug_names(ntl, drug_name_dict, size_others=150)
+    drug_names = non_op_names + op_names
 
     return
 
