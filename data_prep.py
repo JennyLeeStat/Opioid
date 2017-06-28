@@ -11,6 +11,8 @@ logging.basicConfig(
 import warnings
 warnings.filterwarnings('ignore')
 
+from sklearn.preprocessing import LabelEncoder
+
 import utils
 
 drugs_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_NPI_DRUG_15.zip"
@@ -19,7 +21,7 @@ st_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistic
 ntl_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_Drug_Ntl_15.zip"
 
 dest_dir = "dataset"
-chunk_size = 100000
+chunk_size = 200000
 n_other_drugs = 50
 n_batches_to_try = 10000
 random_state = 42
@@ -193,6 +195,7 @@ def minmaxscaler(X):
     :return: scaled feature
     """
     X_std = (X - X.min()) / (X.max() - X.min())
+    X_std = X_std.fillna(0)
     return X_std
 
 
@@ -237,14 +240,19 @@ def clean_drug_chunks(drugs, npi, non_op_names, op_names, pred_longer=True, chun
     # ========== separate labels from features ==========
     if pred_longer:
         labels = wide_table[ 'op_longer' ]
+        le = LabelEncoder()
+        labels = le.fit_transform(labels)
         features = wide_table.drop([ 'op_longer', 'op_prescriber' ], axis=1)
         features = pd.get_dummies(features)
-        # TODO: depending on what samples are in the chunk, the length of one-hot coded
-        # will vary - should I fix it?
+        # TODO: fix features!
+
         return features, labels
 
     else:
         labels = wide_table[ 'op_prescriber' ]
+        le = LabelEncoder()
+        labels = le.fit_transform(labels)
+
         cols_to_drop = op_names + [ 'op_longer', 'op_prescriber' ]
         op_features = wide_table.loc[ :, op_names ]
         features = wide_table.drop(cols_to_drop, axis=1)
@@ -260,7 +268,8 @@ def get_minibatch(drugs, npi, non_op_names, op_names, pred_longer=True, chunk_si
             features.append(X)
             labels.append(y)
             save_objects(X, y, i)
-            #print(X.shape)
+            print(X.shape)
+
     except StopIteration:
         return None, None
     return features, labels
@@ -272,7 +281,9 @@ def main():
     non_op_names, op_names = get_drug_names(ntl, drug_name_dict)
     drugs = download_drugs()
     features, labels = get_minibatch(drugs, npi, non_op_names, op_names,
-                                     pred_longer=True, chunk_size=100000)
+                                     pred_longer=True, chunk_size=chunk_size)
+
+    # TODO: save features, labels
     return
 
 
