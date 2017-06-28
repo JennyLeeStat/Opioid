@@ -69,9 +69,6 @@ def initialize_stats(partial_fit_classifiers):
     return results
 
 
-def progress(clf_name, results):
-    duration = time.time() - results[ 't0' ]
-
 
 def train_predict(partial_fit_classifiers, train_batch_names, n_train):
     classes = np.array([ 0, 1 ])

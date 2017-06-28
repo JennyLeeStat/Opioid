@@ -3,17 +3,17 @@ import pickle
 import numpy as np
 import pandas as pd
 import logging
+import warnings
+from sklearn.preprocessing import LabelEncoder
+
+import utils
+
+warnings.filterwarnings('ignore')
 
 logging.basicConfig(
     format='%(levelname)s %(message)s',
     stream=sys.stdout, level=logging.INFO)
 
-import warnings
-warnings.filterwarnings('ignore')
-
-from sklearn.preprocessing import LabelEncoder
-
-import utils
 
 drugs_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_NPI_DRUG_15.zip"
 npi_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_NPI_15.zip"
@@ -47,17 +47,24 @@ def prepare_npi(npi_url, dropna=True, add_new_features=True):
                      'opioid_bene_count',
                      'opioid_prescriber_rate' ]
 
-    # assign shorter/simpler names to reamaining columns
-    colnames = [ 'npi', 'gender', 'zipcode',
-                 'state', 'country', 'specialty', 'medicare_status',
-                 'total_day_supply', 'bene_count', 'bene_avg_risk',
+    # assign shorter/simpler names to remaining columns
+    colnames = [ 'npi',
+                 'gender',
+                 'zipcode',
+                 'state',
+                 'country',
+                 'specialty',
+                 'medicare_status',   # prescriber's medicare enrollment status
+                 'total_day_supply',
+                 'bene_count',
+                 'bene_avg_risk',     # avg risk of patients 
                  'antipsych_claims',
-                 'hrm_claims',
+                 'hrm_claims',        # number of high risk medication claims
                  'antibiotic_claims',
                  'op_claims',
                  'op_day_supply',
                  'op_bene_count',
-                 'op_rate' ]
+                 'op_rate' ]          # number of opioid prescription / total prescription
 
     npi = npi.loc[ :, cols_to_keep ]
     npi.columns = colnames
@@ -66,10 +73,12 @@ def prepare_npi(npi_url, dropna=True, add_new_features=True):
     if dropna:
         npi = npi.dropna(subset=[ 'op_claims', 'op_day_supply', 'op_bene_count', 'op_rate' ])
 
+    npi = npi.dropna(subset = ['gender'])
+
     # change the data type of zipcode from float to category
     npi[ 'zipcode' ] = npi[ 'zipcode' ].fillna(0).astype('int').astype('category')
 
-    # omit the non-US samples and drop country feature
+    # omit non-US samples and drop country feature
     npi = npi.loc[ npi[ 'country' ] == 'US', : ]
     npi = npi.drop('country', 1)
 
@@ -86,10 +95,12 @@ def prepare_npi(npi_url, dropna=True, add_new_features=True):
                     'MP' ]  # northern mariana islands
     npi = npi[ ~npi[ 'state' ].isin(misc_states) ]
 
-    # drop misc specialty - omit specialties that less than 0.01% of prescribers belong to
+    # drop misc specialty - omit specialties that less than 100 of prescribers belong to
+    # since dataset contains about 1.1 million prescribers, it's less than .01%
     tmp = npi.specialty.value_counts()
     misc_spec = tmp[ tmp < 100 ].index
     npi = npi[ ~npi[ 'specialty' ].isin(misc_spec) ]
+    npi['specialty'] = utils.clean_txt(npi['specialty'])
 
     if add_new_features:
         # ===== add new features ======
@@ -188,7 +199,7 @@ def download_drugs():
     return drugs
 
 
-def minmaxscaler(X):
+def minmax_scaler(X):
     """
     scale a feature so that it has min value 0, and max value 1
     :param X: a pandas series of feature
@@ -205,6 +216,16 @@ def save_objects(features, labels, i):
         pickle.dump(features, f)
         pickle.dump(labels, f)
         f.close()
+
+
+def get_dummies(npi):
+    cat_to_keep = ['gender', 'state', 'specialty']
+    results = {}
+    for cat in cat_to_keep:
+        names = npi[cat].unique()
+        dummies = [cat + '_' + s for s in names]
+        results[cat] = dummies
+    return results['gender'] + results['state'] + results['specialty']
 
 
 def clean_drug_chunks(drugs, npi, non_op_names, op_names, pred_longer=True, chunk_size=chunk_size):
@@ -225,12 +246,16 @@ def clean_drug_chunks(drugs, npi, non_op_names, op_names, pred_longer=True, chun
     wide_table.index.name = 'npi'
 
     # =========== feature scaling ==========
-    wide_table_sc = wide_table.apply(func=minmaxscaler, axis=1)
+    wide_table_sc = wide_table.apply(func=minmax_scaler, axis=1)
 
     # joined by prescriber summary data
     npi_small = npi.copy()
-    cols_to_keep = [ 'npi', 'gender', 'state', 'specialty',
-                     'medicare_status', 'op_prescriber', 'op_longer' ]
+    cols_to_keep = [ 'npi',
+                     'gender',
+                     'state',
+                     'specialty',
+                     'medicare_status',
+                     'op_prescriber', 'op_longer' ]
     npi_small = npi_small.loc[ :, cols_to_keep ]
     npi_small = npi_small.set_index('npi')
 
@@ -244,7 +269,8 @@ def clean_drug_chunks(drugs, npi, non_op_names, op_names, pred_longer=True, chun
         labels = le.fit_transform(labels)
         features = wide_table.drop([ 'op_longer', 'op_prescriber' ], axis=1)
         features = pd.get_dummies(features)
-        # TODO: fix features!
+        cols_to_keep = get_dummies(npi) + drug_names
+        features = features.loc[:, cols_to_keep].fillna(0)
 
         return features, labels
 
@@ -257,22 +283,24 @@ def clean_drug_chunks(drugs, npi, non_op_names, op_names, pred_longer=True, chun
         op_features = wide_table.loc[ :, op_names ]
         features = wide_table.drop(cols_to_drop, axis=1)
         features = pd.get_dummies(features)
+        cols_to_keep = get_dummies(npi) + non_op_names
+        features = features.loc[:, cols_to_keep].fillna(0)
         return features, op_features, labels
 
 
 def get_minibatch(drugs, npi, non_op_names, op_names, pred_longer=True, chunk_size=chunk_size):
-    features, labels = [ ], [ ]
+
     try:
         for i in range(n_batches_to_try):
             X, y = clean_drug_chunks(drugs, npi, non_op_names, op_names, pred_longer=True, chunk_size=chunk_size)
-            features.append(X)
-            labels.append(y)
             save_objects(X, y, i)
+            print(i)
             print(X.shape)
 
     except StopIteration:
         return None, None
-    return features, labels
+
+    return
 
 
 def main():
@@ -280,7 +308,7 @@ def main():
     ntl, drug_name_dict = get_drug_name_dict()
     non_op_names, op_names = get_drug_names(ntl, drug_name_dict)
     drugs = download_drugs()
-    features, labels = get_minibatch(drugs, npi, non_op_names, op_names,
+    get_minibatch(drugs, npi, non_op_names, op_names,
                                      pred_longer=True, chunk_size=chunk_size)
 
     # TODO: save features, labels
