@@ -4,8 +4,11 @@ import time
 import logging
 import pickle
 import numpy as np
+import pandas as pd
 import pyprind
 from glob import glob
+import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.linear_model import SGDClassifier
 from sklearn.linear_model import PassiveAggressiveClassifier
 from sklearn.linear_model import Perceptron
@@ -19,8 +22,9 @@ logging.basicConfig(
 random_state = 42
 batch_dir = "dataset/batches"
 test_ratio = .15
-validate_every = 10
-print_every = 10
+validate_every = 9
+print_every = 20
+
 
 partial_fit_classifiers = {
     'SGD': SGDClassifier(random_state=random_state, loss='log'),
@@ -42,6 +46,7 @@ def split_test(batch_dir=batch_dir, test_ratio=test_ratio):
     filepath_list = glob(os.path.join(batch_dir, "*.pickle"))
     n_batches = len(filepath_list)
     n_test = int(test_ratio * n_batches)
+    np.random.RandomState(random_state)
     test_batch_names = np.random.choice(filepath_list, n_test, replace=False)
     train_batch_names = np.setdiff1d(filepath_list, test_batch_names)
     logging.info("Number of test batches: {}".format(len(test_batch_names)))
@@ -109,7 +114,7 @@ def train_predict(partial_fit_classifiers, train_batch_names, n_train):
 
         if i % print_every == 0 and i > 0:
             logging.info("iter {} / {}".format(i, n_train))
-            logging.info("Number of training sample: {}".format(X_train.shape[ 0 ]))
+            logging.info("Number of validation sample: {}".format(X_train.shape[ 0 ]))
             logging.info("===== F-beta score (beta=0.5) ==========")
             logging.info("SGD: {}".format(results[ 'SGD' ][ 'f_train' ][ -1 ]))
             logging.info("Perceptron: {}".format(results[ 'Perceptron' ][ 'f_train' ][ -1 ]))
@@ -121,10 +126,42 @@ def train_predict(partial_fit_classifiers, train_batch_names, n_train):
 
     return results
 
+def get_time_res(results):
+    n_train = results['SGD']['n_train']
+    res = []
+    for k in partial_fit_classifiers.keys():
+        train_time = results[k]['train_time']
+        pred_time = results[k]['train_time']
+        mean_train_time = np.mean([5000 * t / n_train[i] for i, t in enumerate(train_time)])
+        mean_pred_time = np.mean([5000 * t / n_train[i] for i, t in enumerate(pred_time)])
+        res.append((k, mean_train_time, mean_pred_time))
+    return res
+
+
+def plot_time(res):
+    res = pd.DataFrame(res)
+    res.columns = [ 'clf_name', 'train', 'pred' ]
+    res_melt = pd.melt(res, id_vars=[ 'clf_name' ], value_vars=[ 'train', 'pred' ])
+    res_melt.columns = [ 'clf_name', 'time', 'value' ]
+
+    plt.figure(figsize=(11, 5))
+    sns.barplot(x="clf_name", y="value", hue="time", data=res_melt)
+    plt.xlabel('')
+    plt.ylabel('runtime(sec)')
+    plt.title('Runtime per 5,000 instances')
+    plt.savefig("asset/time_res.png")
+    plt.show()
+
 def main():
     test_batch_names, train_batch_names = split_test(batch_dir=batch_dir, test_ratio=test_ratio)
-    results = train_predict(partial_fit_classifiers, train_batch_names, n_train=197)
-    return results
+    n_train = len(train_batch_names)
+    results = train_predict(partial_fit_classifiers, train_batch_names, n_train=n_train)
+
+    filename = "results.pickle"
+    with open(filename, 'wb') as f:
+        pickle.dump(results, f)
+        f.close()
+    return
 
 
 if __name__ == "__main__":
