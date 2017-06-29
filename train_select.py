@@ -22,8 +22,8 @@ logging.basicConfig(
 random_state = 42
 batch_dir = "dataset/batches"
 test_ratio = .15
-validate_every = 9
-print_every = 20
+validate_every = 10
+print_every = 10
 
 
 partial_fit_classifiers = {
@@ -101,10 +101,10 @@ def train_predict(partial_fit_classifiers, train_batch_names, n_train):
         if i % validate_every == 0 and i > 0:
             X_val, y_val = X_train, y_train
             pred_val = clf.predict(X_val)
-            results[ clf_name ][ 'acc_test' ] = accuracy_score(y_val, pred_val)
-            results[ clf_name ][ 'f_test' ] = fbeta_score(y_val, pred_val, beta=.5)
+            results[ clf_name ][ 'acc_test' ].append(accuracy_score(y_val, pred_val))
+            results[ clf_name ][ 'f_test' ].append(fbeta_score(y_val, pred_val, beta=.5))
 
-            # After validation, we'll use this set to  update our model
+            # After validation, we'll use the val batch to  update our model
             clf.partial_fit(X_train, y_train, classes=classes)
             pred_train = clf.predict(X_train)
             results[ clf_name ][ 'n_train' ].append(X_train.shape[ 0 ])
@@ -140,17 +140,47 @@ def get_time_res(results):
 
 def plot_time(res):
     res = pd.DataFrame(res)
-    res.columns = [ 'clf_name', 'train', 'pred' ]
-    res_melt = pd.melt(res, id_vars=[ 'clf_name' ], value_vars=[ 'train', 'pred' ])
+    res.columns = [ 'clf_name', 'training', 'prediction' ]
+    res[ 'total' ] = res[ 'training' ] + res[ 'prediction' ]
+    res = res.sort_values(by='total')
+    res_melt = pd.melt(res, id_vars=[ 'clf_name' ], value_vars=[ 'prediction', 'training', 'total' ])
     res_melt.columns = [ 'clf_name', 'time', 'value' ]
 
     plt.figure(figsize=(11, 5))
-    sns.barplot(x="clf_name", y="value", hue="time", data=res_melt)
+    sns.barplot(x="clf_name", y="value", hue="time", data=res_melt,
+                palette=sns.color_palette("husl", 3),
+                linewidth=1, edgecolor=".2")
     plt.xlabel('')
     plt.ylabel('runtime(sec)')
     plt.title('Runtime per 5,000 instances')
-    plt.savefig("asset/time_res.png")
+    plt.savefig("assets/time_res.png")
     plt.show()
+
+
+def plot_score(results):
+    my_col = sns.color_palette("husl", 4)
+    plt.figure(figsize=(11, 5))
+    ax1 = plt.subplot(121)
+    n = np.cumsum(results[ 'SGD' ][ 'n_train' ])
+    len_n = len(n)
+    for i, clf_name in enumerate(partial_fit_classifiers.keys()):
+        plt.plot(n, pd.Series(results[ clf_name ][ 'acc_train' ][ :len_n ]).rolling(window=5).mean(),
+                 color=my_col[ i ], linewidth=2.5)
+    plt.ylabel("Accuracy")
+    plt.xlabel("Training samples (#)")
+    plt.legend(loc="best", labels=partial_fit_classifiers.keys())
+    plt.title("Accuracy on training set")
+
+    ax2 = plt.subplot(122, sharey=ax1)
+    for i, clf_name in enumerate(partial_fit_classifiers.keys()):
+        plt.plot(n, pd.Series(results[ clf_name ][ 'f_train' ][ :len_n ]).rolling(window=5).mean(),
+                 color=my_col[ i ], linewidth=2.5)
+    plt.ylabel("F-score")
+    plt.xlabel("Training samples (#)")
+    plt.title("F-score (beta=0.5) on training set")
+    plt.savefig("assets/compare_score.png")
+    plt.show()
+
 
 def main():
     test_batch_names, train_batch_names = split_test(batch_dir=batch_dir, test_ratio=test_ratio)

@@ -21,7 +21,7 @@ st_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistic
 ntl_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_Drug_Ntl_15.zip"
 
 dest_dir = "dataset"
-chunk_size = 200000
+chunk_size = 100000
 n_other_drugs = 50
 n_batches_to_try = 10000
 random_state = 42
@@ -294,8 +294,8 @@ def get_minibatch(drugs, npi, non_op_names, op_names, pred_longer=True, chunk_si
         for i in range(n_batches_to_try):
             X, y = clean_drug_chunks(drugs, npi, non_op_names, op_names, pred_longer=True, chunk_size=chunk_size)
             save_objects(X, y, i)
-            print(i)
-            print(X.shape)
+            #print(i)
+            #print(X.shape)
 
     except StopIteration:
         return None, None
@@ -311,7 +311,6 @@ def main():
     get_minibatch(drugs, npi, non_op_names, op_names,
                                      pred_longer=True, chunk_size=chunk_size)
 
-    # TODO: save features, labels
     return
 
 
