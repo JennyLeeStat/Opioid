@@ -22,16 +22,16 @@ ntl_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statisti
 
 dest_dir = "dataset"
 chunk_size = 100000
-n_other_drugs = 50
+n_other_drugs = 300
 n_batches_to_try = 10000
+batch_length = 32
 random_state = 42
 
 
-def prepare_npi(npi_url, dropna=True, add_new_features=True):
+def prepare_npi(npi_url, dropna=True, add_new_features=True, verbose=True):
     utils.download_and_decompress(npi_url, dest_dir)
     filename = dest_dir + "/" + npi_url.split("/")[ -1 ].split(".")[ 0 ] + ".txt"
     npi = pd.read_table(filename)
-    # TODO: add verbose flag, and print out preprocessing progress
 
     # ===== Feature selection =====
     cols_to_keep = [ 'npi', 'nppes_provider_gender', 'nppes_provider_zip5',
@@ -48,7 +48,7 @@ def prepare_npi(npi_url, dropna=True, add_new_features=True):
                      'opioid_prescriber_rate' ]
 
     # assign shorter/simpler names to remaining columns
-    colnames = [ 'npi',
+    colnames = [ 'npi',               # prescribers ID
                  'gender',
                  'zipcode',
                  'state',
@@ -73,6 +73,7 @@ def prepare_npi(npi_url, dropna=True, add_new_features=True):
     if dropna:
         npi = npi.dropna(subset=[ 'op_claims', 'op_day_supply', 'op_bene_count', 'op_rate' ])
 
+    # 9 samples have nan values for gender
     npi = npi.dropna(subset = ['gender'])
 
     # change the data type of zipcode from float to category
@@ -101,6 +102,8 @@ def prepare_npi(npi_url, dropna=True, add_new_features=True):
     misc_spec = tmp[ tmp < 100 ].index
     npi = npi[ ~npi[ 'specialty' ].isin(misc_spec) ]
     npi['specialty'] = utils.clean_txt(npi['specialty'])
+    if verbose:
+        logging.info("Data cleaning completed")
 
     if add_new_features:
         # ===== add new features ======
@@ -108,6 +111,9 @@ def prepare_npi(npi_url, dropna=True, add_new_features=True):
         npi[ 'avg_op_day_supply' ] = npi[ 'op_day_supply' ] / npi[ 'op_bene_count' ]
         npi[ 'avg_op_day_supply' ] = npi[ 'avg_op_day_supply' ].fillna(0)
         npi[ 'op_longer' ] = npi[ 'avg_op_day_supply' ] > 84  # 12 weeks
+
+        if verbose:
+            logging.info("New features are added")
 
     filename2 = filename.split(".")[ 0 ] + "_clean.csv"
     npi.to_csv(filename2)
@@ -127,6 +133,8 @@ def get_drug_name_dict(threshold=500):
     utils.download_and_decompress(ntl_url, dest_dir)
     filename = dest_dir + "/" + ntl_url.split("/")[ -1 ].split(".")[ 0 ] + ".xlsx"
     ntl = pd.read_excel(filename, sheetname=2, header=1)
+
+    # nan values for number of prescribers are recorded as empty space. Let's drop this
     ntl = ntl.loc[ ntl[ 'Number of Prescribers' ] != '  ' ]
     ntl[ 'Number of Prescribers' ] = pd.to_numeric(ntl[ 'Number of Prescribers' ])
 
@@ -263,39 +271,26 @@ def clean_drug_chunks(drugs, npi, non_op_names, op_names, pred_longer=True, chun
 
 
     # ========== separate labels from features ==========
-    if pred_longer:
-        labels = wide_table[ 'op_longer' ]
-        le = LabelEncoder()
-        labels = le.fit_transform(labels)
-        features = wide_table.drop([ 'op_longer', 'op_prescriber' ], axis=1)
-        features = pd.get_dummies(features)
-        cols_to_keep = get_dummies(npi) + drug_names
-        features = features.loc[:, cols_to_keep].fillna(0)
+    labels = wide_table[ 'op_prescriber' ]
+    le = LabelEncoder()
+    labels = le.fit_transform(labels)
 
-        return features, labels
-
-    else:
-        labels = wide_table[ 'op_prescriber' ]
-        le = LabelEncoder()
-        labels = le.fit_transform(labels)
-
-        cols_to_drop = op_names + [ 'op_longer', 'op_prescriber' ]
-        op_features = wide_table.loc[ :, op_names ]
-        features = wide_table.drop(cols_to_drop, axis=1)
-        features = pd.get_dummies(features)
-        cols_to_keep = get_dummies(npi) + non_op_names
-        features = features.loc[:, cols_to_keep].fillna(0)
-        return features, op_features, labels
+    cols_to_drop = op_names + [ 'op_longer', 'op_prescriber' ]
+    op_features = wide_table.loc[ :, op_names ]
+    features = wide_table.drop(cols_to_drop, axis=1)
+    features = pd.get_dummies(features)
+    cols_to_keep = get_dummies(npi) + non_op_names
+    features = features.loc[:, cols_to_keep].fillna(0)
+    return features, op_features, labels
 
 
-def get_minibatch(drugs, npi, non_op_names, op_names, pred_longer=True, chunk_size=chunk_size):
+def get_minibatch(drugs, npi, non_op_names, op_names, pred_longer=False, chunk_size=chunk_size):
 
     try:
         for i in range(n_batches_to_try):
-            X, y = clean_drug_chunks(drugs, npi, non_op_names, op_names, pred_longer=True, chunk_size=chunk_size)
+            X, _, y = clean_drug_chunks(drugs, npi, non_op_names, op_names, pred_longer=pred_longer, chunk_size=chunk_size)
             save_objects(X, y, i)
-            #print(i)
-            #print(X.shape)
+            print('batch {}: shape: {}'.format(i, X.shape))
 
     except StopIteration:
         return None, None
@@ -309,7 +304,7 @@ def main():
     non_op_names, op_names = get_drug_names(ntl, drug_name_dict)
     drugs = download_drugs()
     get_minibatch(drugs, npi, non_op_names, op_names,
-                                     pred_longer=True, chunk_size=chunk_size)
+                                     pred_longer=False, chunk_size=chunk_size)
 
     return
 
