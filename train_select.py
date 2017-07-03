@@ -7,7 +7,7 @@ import pickle
 import numpy as np
 import pandas as pd
 import pyprind
-from glob import glob
+import glob
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.linear_model import SGDClassifier
@@ -25,6 +25,9 @@ batch_dir = "dataset/batches"
 test_ratio = .15
 validate_every = 10
 print_every = 10
+loss = ['hinge', 'log']
+alpha = [.000001, .00001, .0001, .001]
+l1_ratio = [0., .1, .2, .3, .4, .5, .6, .7, .8, .9]
 
 
 partial_fit_classifiers = {
@@ -44,27 +47,35 @@ def load_batches(filename):
 
 
 def split_test(batch_dir=batch_dir, test_ratio=test_ratio):
-    filepath_list = glob(os.path.join(batch_dir, "*.pickle"))
+    filepath_list = glob.glob(os.path.join(batch_dir, "*.pickle"))
     n_batches = len(filepath_list)
     n_test = int(test_ratio * n_batches)
     np.random.RandomState(random_state)
     test_batch_names = np.random.choice(filepath_list, n_test, replace=False)
-    train_batch_names = np.setdiff1d(filepath_list, test_batch_names)
+    new_test_batch_names = [ (b, os.path.join('dataset/batches/test_batches', b.split("/")[ -1 ])) \
+                             for b in test_batch_names ]
+    for names in new_test_batch_names:
+        os.rename(names[ 0 ], names[ 1 ])
 
-    # shuffle train batches
-    train_batch_names = np.random.choice(train_batch_names, len(train_batch_names), replace=False)
-    logging.info("Number of test batches: {}".format(len(test_batch_names)))
-    logging.info("Number of train batches: {}".format(len(train_batch_names)))
+    train_batch_names = np.setdiff1d(filepath_list, test_batch_names)
+    new_train_batch_names = [ (b, os.path.join('dataset/batches/train_batches', b.split("/")[ -1 ])) \
+                              for b in train_batch_names ]
+    for names in new_train_batch_names:
+        os.rename(names[ 0 ], names[ 1 ])
+
+    logging.info("Number of test batches: {}".format(len(new_test_batch_names)))
+    logging.info("Number of train batches: {}".format(len(new_train_batch_names)))
+
     return test_batch_names, train_batch_names
 
 
-def concat_val_batches(train_batch_names, n_train):
-    val_batch_names = train_batch_names[ n_train: ]
+
+def concat_batches(batch_names):
     features = None
     labels = None
-    logging.info("Concatenating {} validation batches".format(len(val_batch_names)))
-    pbar = pyprind.ProgBar(len(val_batch_names))
-    for file in val_batch_names:
+    logging.info("Concatenating {} batches".format(len(batch_names)))
+    pbar = pyprind.ProgBar(len(batch_names))
+    for file in batch_names:
         X, y = load_batches(file)
         if features is None:
             features = X
@@ -74,15 +85,14 @@ def concat_val_batches(train_batch_names, n_train):
             labels = np.concatenate([ labels, y ])
         pbar.update()
 
-    # logging.info("Validation set shape: {}".format(features.shape))
     return features, labels
+
 
 
 def initialize_stats(partial_fit_classifiers):
     results = {}
     for clf_name in partial_fit_classifiers:
         stats = {
-            #'t0': time.time(),
             'n_train': [],
             'n_train_pos': [],
             'train_time': [],
@@ -251,31 +261,46 @@ def get_test_score(results):
     return test_score
 
 
-def sgd_grid_search(train_batch_names, n_train, loss, alpha, l1_ratio):
+def sgd_grid_search(train_batch_names, n_train, X_val, y_val, loss, alpha, l1_ratio, save_res=True):
     classes = np.array([ 0, 1 ])
     files_to_read = train_batch_names[ :n_train ]
-    X_val, y_val = concat_val_batches(train_batch_names, n_train, True)
 
     params = list(itertools.product(alpha, l1_ratio))
     params_ = list(itertools.product(loss, params))
-    param_dict = [ {'loss': c[ 0 ], 'alpha': c[ 1 ][ 0 ], 'l1_ratio': c[ 1 ][ 1 ], 'val_f_score': 0.} for c in params_ ]
+    param_dict = [ {'loss': c[ 0 ],
+                    'alpha': c[ 1 ][ 0 ],
+                    'l1_ratio': c[ 1 ][ 1 ],
+                    'val_f_score': 0.} for c in params_ ]
 
+    start = time.time()
     for i, p in enumerate(param_dict):
         clf = SGDClassifier(loss=p[ 'loss' ], alpha=p[ 'alpha' ], l1_ratio=p[ 'l1_ratio' ],
                             random_state=random_state)
 
         logging.info("{}/{} Evaluating hyperparameters: {}".format(i + 1, len(param_dict), p))
         for i, filename in enumerate(files_to_read):
-            X_train, y_train = ts.load_batches(filename)
+            X_train, y_train = load_batches(filename)
             clf.partial_fit(X_train, y_train, classes=classes)
             pred_val = clf.predict(X_val)
             p[ 'val_f_score' ] = fbeta_score(y_val, pred_val, beta=.5)
 
-    return pd.DataFrame(param_dict)
+    logging.info("Total time elapsed: {}".format(time.time() - start))
+
+    res = pd.DataFrame(param_dict)
+    return res
+    # if save_res:
+    #     pickle_name = 'grid_search.pickle'
+    #     with open(pickle_name, 'wb') as f:
+    #         pickle.dump(res, f)
+    #         f.close()
+    #     logging.info("grid seach result is saved as: {}".format(pickle_name))
 
 
-# def main():
-#     test_batch_names, train_batch_names = split_test(batch_dir=batch_dir, test_ratio=test_ratio)
+
+
+
+def main():
+     test_batch_names, train_batch_names = split_test(batch_dir=batch_dir, test_ratio=test_ratio)
 #     n_train = len(train_batch_names)
 #     results = train_predict(partial_fit_classifiers, train_batch_names, n_train=n_train)
 #
@@ -287,4 +312,4 @@ def sgd_grid_search(train_batch_names, n_train, loss, alpha, l1_ratio):
 
 
 if __name__ == "__main__":
-    main()
+     main()
