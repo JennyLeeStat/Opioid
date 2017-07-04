@@ -196,17 +196,6 @@ def get_drug_names(ntl, drug_name_dict, n_other_drugs=n_other_drugs, random_stat
     return non_op_names, op_names
 
 
-def download_drugs():
-    """
-    dataset 'detailed data' is downloaded and loaded  
-    :return: drugs - TextFileReader object for getting chunks 
-    """
-    utils.download_and_decompress(drugs_url, dest_dir)
-    filename = dest_dir + "/" + drugs_url.split("/")[ -1 ].split(".")[ 0 ] + ".txt"
-    drugs = pd.read_table(filename, iterator=True)
-    return drugs
-
-
 def minmax_scaler(X):
     """
     scale a feature so that it has min value 0, and max value 1
@@ -236,7 +225,18 @@ def get_dummies(npi):
     return results['gender'] + results['state'] + results['specialty']
 
 
-def clean_drug_chunks(drugs, npi, non_op_names, op_names, pred_longer=True, chunk_size=chunk_size):
+def download_drugs():
+    """
+    dataset 'detailed data' is downloaded and loaded  
+    :return: drugs - TextFileReader object for getting chunks 
+    """
+    utils.download_and_decompress(drugs_url, dest_dir)
+    filename = dest_dir + "/" + drugs_url.split("/")[ -1 ].split(".")[ 0 ] + ".txt"
+    drugs = pd.read_table(filename, iterator=True)
+    return drugs
+
+
+def clean_drug_chunks(drugs, npi, non_op_names, op_names, scale=True, get_dummies=True, chunk_size=chunk_size):
     small = drugs.get_chunk(chunk_size)
     small[ 'avg_day_supply' ] = small[ 'total_day_supply' ] / small[ 'bene_count' ]
     small[ 'generic_name' ] = utils.clean_txt(small[ 'generic_name' ])
@@ -254,7 +254,8 @@ def clean_drug_chunks(drugs, npi, non_op_names, op_names, pred_longer=True, chun
     wide_table.index.name = 'npi'
 
     # =========== feature scaling ==========
-    wide_table_sc = wide_table.apply(func=minmax_scaler, axis=1)
+    if scale:
+        wide_table = wide_table.apply(func=minmax_scaler, axis=1)
 
     # joined by prescriber summary data
     npi_small = npi.copy()
@@ -267,7 +268,7 @@ def clean_drug_chunks(drugs, npi, non_op_names, op_names, pred_longer=True, chun
     npi_small = npi_small.loc[ :, cols_to_keep ]
     npi_small = npi_small.set_index('npi')
 
-    wide_table = wide_table_sc.join(npi_small, how='inner')
+    wide_table = wide_table.join(npi_small, how='inner')
 
 
     # ========== separate labels from features ==========
@@ -278,9 +279,11 @@ def clean_drug_chunks(drugs, npi, non_op_names, op_names, pred_longer=True, chun
     cols_to_drop = op_names + [ 'op_longer', 'op_prescriber' ]
     op_features = wide_table.loc[ :, op_names ]
     features = wide_table.drop(cols_to_drop, axis=1)
-    features = pd.get_dummies(features)
-    cols_to_keep = get_dummies(npi) + non_op_names
-    features = features.loc[:, cols_to_keep].fillna(0)
+    if get_dummies():
+        features = pd.get_dummies(features)
+        cols_to_keep = get_dummies(npi) + non_op_names
+        features = features.loc[:, cols_to_keep].fillna(0)
+
     return features, op_features, labels
 
 
