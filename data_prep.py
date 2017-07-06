@@ -243,6 +243,8 @@ def download_drugs():
 def clean_drug_chunks(drugs, npi, non_op_names, op_names, scale=True, chunk_size=chunk_size):
 
     small = drugs.get_chunk(chunk_size)
+
+    # drop instances if num of beneficiaries was 0
     small = small.loc[small['bene_count'] > 0, :]
     small[ 'avg_day_supply' ] = small[ 'total_day_supply' ] / small[ 'bene_count' ]
     small[ 'generic_name' ] = utils.clean_txt(small[ 'generic_name' ])
@@ -256,7 +258,7 @@ def clean_drug_chunks(drugs, npi, non_op_names, op_names, scale=True, chunk_size
                              values=small[ 'avg_day_supply' ],
                              aggfunc=np.mean)
 
-    drug_names = op_names + non_op_names
+    drug_names = (op_names + non_op_names).unique()
     wide_table = wide_table.loc[ :, drug_names ]
     wide_table = wide_table.fillna(0)
     wide_table.index.name = 'npi'
