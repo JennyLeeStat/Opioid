@@ -1,10 +1,11 @@
+import os
 import sys
+import glob
 import pickle
 import numpy as np
 import pandas as pd
 import logging
 import warnings
-from sklearn.preprocessing import LabelEncoder
 
 import utils
 
@@ -14,19 +15,21 @@ logging.basicConfig(
     format='%(levelname)s %(message)s',
     stream=sys.stdout, level=logging.INFO)
 
-
+# dataset urls
 drugs_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_NPI_DRUG_15.zip"
 npi_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_NPI_15.zip"
 st_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_Drug_St_15.zip"
 ntl_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_Drug_Ntl_15.zip"
 
+# model parameters
 dest_dir = "dataset"
 chunk_size = 100000
 n_other_drugs = 300
 n_batches_to_try = 10000
 batch_length = 32
 random_state = 42
-
+test_ratio = 0.15
+batch_dir = "dataset/batches"
 
 def prepare_npi(npi_url, dropna=True, add_new_features=True, verbose=True):
     utils.download_and_decompress(npi_url, dest_dir)
@@ -71,7 +74,7 @@ def prepare_npi(npi_url, dropna=True, add_new_features=True, verbose=True):
 
     # ===== data cleaning ======
     if dropna:
-        npi = npi.dropna(subset=[ 'op_claims', 'op_day_supply', 'op_bene_count', 'op_rate' ])
+        npi = npi.dropna(subset=[ 'bene_count', 'op_claims', 'op_day_supply', 'op_bene_count', 'op_rate' ])
 
     # 9 samples have nan values for gender
     npi = npi.dropna(subset = ['gender'])
@@ -115,6 +118,7 @@ def prepare_npi(npi_url, dropna=True, add_new_features=True, verbose=True):
         if verbose:
             logging.info("New features are added")
 
+    npi = npi.set_index('npi')
     filename2 = filename.split(".")[ 0 ] + "_clean.csv"
     npi.to_csv(filename2)
     logging.info("prescriber summary dataset is prepared and")
@@ -215,7 +219,7 @@ def save_objects(features, labels, i):
         f.close()
 
 
-def get_dummies(npi):
+def get_my_dummies(npi):
     cat_to_keep = ['gender', 'state', 'specialty']
     results = {}
     for cat in cat_to_keep:
@@ -236,10 +240,13 @@ def download_drugs():
     return drugs
 
 
-def clean_drug_chunks(drugs, npi, non_op_names, op_names, scale=True, get_dummies=True, chunk_size=chunk_size):
+def clean_drug_chunks(drugs, npi, non_op_names, op_names, scale=True, chunk_size=chunk_size):
+
     small = drugs.get_chunk(chunk_size)
+    small = small.loc[small['bene_count'] > 0, :]
     small[ 'avg_day_supply' ] = small[ 'total_day_supply' ] / small[ 'bene_count' ]
     small[ 'generic_name' ] = utils.clean_txt(small[ 'generic_name' ])
+
     cols_to_keep = [ 'npi', 'generic_name', 'avg_day_supply' ]
     small = small.loc[ :, cols_to_keep ]
     small = small.set_index('npi')
@@ -248,6 +255,7 @@ def clean_drug_chunks(drugs, npi, non_op_names, op_names, scale=True, get_dummie
                              columns=small[ 'generic_name' ],
                              values=small[ 'avg_day_supply' ],
                              aggfunc=np.mean)
+
     drug_names = op_names + non_op_names
     wide_table = wide_table.loc[ :, drug_names ]
     wide_table = wide_table.fillna(0)
@@ -259,39 +267,46 @@ def clean_drug_chunks(drugs, npi, non_op_names, op_names, scale=True, get_dummie
 
     # joined by prescriber summary data
     npi_small = npi.copy()
-    cols_to_keep = [ 'npi',
-                     'gender',
+    cols_to_keep = [ 'gender',
                      'state',
                      'specialty',
                      'medicare_status',
-                     'op_prescriber', 'op_longer' ]
+                     'op_prescriber',
+                     'op_longer' ]
     npi_small = npi_small.loc[ :, cols_to_keep ]
-    npi_small = npi_small.set_index('npi')
-
     wide_table = wide_table.join(npi_small, how='inner')
 
+    return wide_table
 
-    # ========== separate labels from features ==========
-    labels = wide_table[ 'op_prescriber' ]
-    le = LabelEncoder()
-    labels = le.fit_transform(labels)
 
-    cols_to_drop = op_names + [ 'op_longer', 'op_prescriber' ]
+def split_label(wide_table, npi, non_op_names, op_names, label='op_longer'):
+    """
+    separate labels from features 
+    """
+
+    wide_table[ label ] = wide_table[ label ].map({False: 0, True: 1})
+    labels = wide_table[ label ]
+
     op_features = wide_table.loc[ :, op_names ]
+
+    op_labels = [ 'op_longer', 'op_prescriber' ]
+    cols_to_drop = op_names + op_labels
+
     features = wide_table.drop(cols_to_drop, axis=1)
-    if get_dummies():
-        features = pd.get_dummies(features)
-        cols_to_keep = get_dummies(npi) + non_op_names
-        features = features.loc[:, cols_to_keep].fillna(0)
+    features = pd.get_dummies(features)
+
+    cols_to_keep = get_my_dummies(npi) + non_op_names
+    features = features.loc[ :, cols_to_keep ].fillna(0)
 
     return features, op_features, labels
 
 
-def get_minibatch(drugs, npi, non_op_names, op_names, pred_longer=False, chunk_size=chunk_size):
+def get_minibatch(drugs, npi, non_op_names, op_names):
 
     try:
         for i in range(n_batches_to_try):
-            X, _, y = clean_drug_chunks(drugs, npi, non_op_names, op_names, pred_longer=pred_longer, chunk_size=chunk_size)
+            wide_table = clean_drug_chunks(drugs, npi, non_op_names, op_names)
+            X, _, y = split_label(wide_table, npi, non_op_names, op_names)
             save_objects(X, y, i)
             print('batch {}: shape: {}'.format(i, X.shape))
 
@@ -300,15 +315,42 @@ def get_minibatch(drugs, npi, non_op_names, op_names, pred_longer=False, chunk_s
 
     return
 
+def split_test(batch_dir=batch_dir, test_ratio=test_ratio):
+    filepath_list = glob.glob(os.path.join(batch_dir, "*.pickle"))
+    n_batches = len(filepath_list)
+    n_test = int(test_ratio * n_batches)
+    np.random.RandomState(random_state)
+    test_batch_names = np.random.choice(filepath_list, n_test, replace=False)
+
+    # Move selected test batches to the test_batches dir
+    if not os.path.isdir('dataset/batches/test_batches'): os.mkdir('dataset/batches/test_batches')
+    new_test_batch_names = [ (b, os.path.join('dataset/batches/test_batches', b.split("/")[ -1 ])) \
+                             for b in test_batch_names ]
+    for names in new_test_batch_names:
+        os.rename(names[ 0 ], names[ 1 ])
+
+    # Move remaining batches to the training_batcehs
+    if not os.path.isdir('dataset/batches/train_batches'): os.mkdir('dataset/batches/train_batches')
+    train_batch_names = np.setdiff1d(filepath_list, test_batch_names)
+    new_train_batch_names = [ (b, os.path.join('dataset/batches/train_batches', b.split("/")[ -1 ])) \
+                              for b in train_batch_names ]
+    for names in new_train_batch_names:
+        os.rename(names[ 0 ], names[ 1 ])
+
+    logging.info("Number of test batches: {}".format(len(new_test_batch_names)))
+    logging.info("Number of train batches: {}".format(len(new_train_batch_names)))
+
+    return test_batch_names, train_batch_names
+
+
 
 def main():
     npi = prepare_npi(npi_url, dropna=True, add_new_features=True)
     ntl, drug_name_dict = get_drug_name_dict()
     non_op_names, op_names = get_drug_names(ntl, drug_name_dict)
     drugs = download_drugs()
-    get_minibatch(drugs, npi, non_op_names, op_names,
-                                     pred_longer=False, chunk_size=chunk_size)
-
+    get_minibatch(drugs, npi, non_op_names, op_names)
+    split_test()
     return
 
 
