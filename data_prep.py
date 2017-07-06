@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import glob
 import pickle
 import numpy as np
@@ -258,7 +259,7 @@ def clean_drug_chunks(drugs, npi, non_op_names, op_names, scale=True, chunk_size
                              values=small[ 'avg_day_supply' ],
                              aggfunc=np.mean)
 
-    drug_names = (op_names + non_op_names).unique()
+    drug_names = set(op_names + non_op_names)
     wide_table = wide_table.loc[ :, drug_names ]
     wide_table = wide_table.fillna(0)
     wide_table.index.name = 'npi'
@@ -347,12 +348,14 @@ def split_test(batch_dir=batch_dir, test_ratio=test_ratio):
 
 
 def main():
+    start = time.time()
     npi = prepare_npi(npi_url, dropna=True, add_new_features=True)
     ntl, drug_name_dict = get_drug_name_dict()
     non_op_names, op_names = get_drug_names(ntl, drug_name_dict)
     drugs = download_drugs()
     get_minibatch(drugs, npi, non_op_names, op_names)
     split_test()
+    logging.info("Time elapsed: {}".format(time.time() - start))
     return
 
 
