@@ -16,19 +16,24 @@ from sklearn.linear_model import Perceptron
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.metrics import fbeta_score, accuracy_score
 
+import utils
+import data_prep as prep
+
+
+plt.style.use('ggplot')
 logging.basicConfig(
     format='%(levelname)s %(message)s',
     stream=sys.stdout, level=logging.INFO)
 
 random_state = 42
 batch_dir = "dataset/batches"
-test_ratio = .15
+test_ratio = .2
+n_train = 170
 validate_every = 10
 print_every = 10
 loss = ['hinge', 'log']
 alpha = [.000001, .00001, .0001, .001]
 l1_ratio = [0., .1, .2, .3, .4, .5, .6, .7, .8, .9]
-
 
 partial_fit_classifiers = {
     'SGD-SVM': SGDClassifier(random_state=random_state, loss='hinge'),
@@ -38,36 +43,25 @@ partial_fit_classifiers = {
     'Passive-Aggressive': PassiveAggressiveClassifier(random_state=random_state)
 }
 
+def get_batchnames():
+    train_batch_names = glob.glob(os.path.join('dataset/batches/train_batches', '*.pickle'))
+    train_batch_names = np.random.choice(train_batch_names, len(train_batch_names), replace=False)
+    test_batch_names = glob.glob(os.path.join('dataset/batches/test_batches', '*.pickle'))
+    test_batch_names = np.random.choice(test_batch_names, len(test_batch_names), replace=False)
+
+    logging.info("number of train batches: {}".format(len(train_batch_names)))
+    logging.info("number of test batches: {}".format(len(test_batch_names)))
+    return train_batch_names, test_batch_names
+
+
+
+
 def load_batches(filename):
     with open(filename, 'rb') as f:
         features = pickle.load(f)
         label = pickle.load(f)
         f.close()
     return features, label
-
-
-def split_test(batch_dir=batch_dir, test_ratio=test_ratio):
-    filepath_list = glob.glob(os.path.join(batch_dir, "*.pickle"))
-    n_batches = len(filepath_list)
-    n_test = int(test_ratio * n_batches)
-    np.random.RandomState(random_state)
-    test_batch_names = np.random.choice(filepath_list, n_test, replace=False)
-    new_test_batch_names = [ (b, os.path.join('dataset/batches/test_batches', b.split("/")[ -1 ])) \
-                             for b in test_batch_names ]
-    for names in new_test_batch_names:
-        os.rename(names[ 0 ], names[ 1 ])
-
-    train_batch_names = np.setdiff1d(filepath_list, test_batch_names)
-    new_train_batch_names = [ (b, os.path.join('dataset/batches/train_batches', b.split("/")[ -1 ])) \
-                              for b in train_batch_names ]
-    for names in new_train_batch_names:
-        os.rename(names[ 0 ], names[ 1 ])
-
-    logging.info("Number of test batches: {}".format(len(new_test_batch_names)))
-    logging.info("Number of train batches: {}".format(len(new_train_batch_names)))
-
-    return test_batch_names, train_batch_names
-
 
 
 def concat_batches(batch_names):
@@ -208,6 +202,7 @@ def plot_score(results, window=20):
                  color=my_col[ i ], linewidth=2.5)
     plt.ylabel("Accuracy")
     plt.xlabel("Training samples (#)")
+    plt.legend(loc="best", labels=partial_fit_classifiers.keys())
     plt.title("Accuracy on training set")
 
     ax2 = plt.subplot(222, sharey=ax1)
@@ -216,7 +211,7 @@ def plot_score(results, window=20):
                  color=my_col[ i ], linewidth=2.5)
     plt.ylabel("F-score")
     plt.xlabel("Training samples (#)")
-    plt.legend(loc="best", labels=partial_fit_classifiers.keys())
+    #plt.legend(loc="best", labels=partial_fit_classifiers.keys())
     plt.title("F score (beta=0.5) on training set")
     plt.savefig("assets/compare_score.png")
     plt.show()
@@ -261,55 +256,126 @@ def get_test_score(results):
     return test_score
 
 
+
 def sgd_grid_search(train_batch_names, n_train, X_val, y_val, loss, alpha, l1_ratio, save_res=True):
     classes = np.array([ 0, 1 ])
     files_to_read = train_batch_names[ :n_train ]
-
     params = list(itertools.product(alpha, l1_ratio))
     params_ = list(itertools.product(loss, params))
     param_dict = [ {'loss': c[ 0 ],
                     'alpha': c[ 1 ][ 0 ],
                     'l1_ratio': c[ 1 ][ 1 ],
                     'val_f_score': 0.} for c in params_ ]
-
     start = time.time()
     for i, p in enumerate(param_dict):
         clf = SGDClassifier(loss=p[ 'loss' ], alpha=p[ 'alpha' ], l1_ratio=p[ 'l1_ratio' ],
                             random_state=random_state)
-
+        print('')
         logging.info("{}/{} Evaluating hyperparameters: {}".format(i + 1, len(param_dict), p))
         for i, filename in enumerate(files_to_read):
             X_train, y_train = load_batches(filename)
             clf.partial_fit(X_train, y_train, classes=classes)
             pred_val = clf.predict(X_val)
             p[ 'val_f_score' ] = fbeta_score(y_val, pred_val, beta=.5)
-
+            sys.stdout.write("\r>> Progress:" + str(100 * (i + 1) / float((len(files_to_read))))[ :4 ] + "%")
+            sys.stdout.flush()
+            logging.info("Validation F-score: {}".format(p[ 'val_f_score' ]))
     logging.info("Total time elapsed: {}".format(time.time() - start))
-
     res = pd.DataFrame(param_dict)
+    if save_res:
+        pickle_name = 'grid_search.pickle'
+        with open(pickle_name, 'wb') as f:
+            pickle.dump(res, f)
+        f.close()
+        logging.info("grid seach result is saved as: {}".format(pickle_name))
     return res
-    # if save_res:
-    #     pickle_name = 'grid_search.pickle'
-    #     with open(pickle_name, 'wb') as f:
-    #         pickle.dump(res, f)
-    #         f.close()
-    #     logging.info("grid seach result is saved as: {}".format(pickle_name))
-
 
 
 
 
 def main():
-     test_batch_names, train_batch_names = split_test(batch_dir=batch_dir, test_ratio=test_ratio)
-#     n_train = len(train_batch_names)
-#     results = train_predict(partial_fit_classifiers, train_batch_names, n_train=n_train)
-#
-#     filename = "results.pickle"
-#     with open(filename, 'wb') as f:
-#         pickle.dump(results, f)
-#         f.close()
-#     return
+    npi = prep.prepare_npi(prep.npi_url)
+    train_batch_names, test_batch_names = get_batchnames()
+
+    # splitting validation batches and test batches
+    val_X, val_y = concat_batches(train_batch_names[ n_train: ])
+    test_X, test_y = concat_batches(test_batch_names)
+    logging.info("In validation set, number of instances: {}".format(len(val_X)))
+    logging.info("In test set, number of instances: {}".format(len(test_X)))
+
+    # train on candidate classifiers
+    results = train_predict(partial_fit_classifiers, train_batch_names, n_train=n_train)
+
+    with open('results/results_five_classifiers.pickle', 'wb') as f:
+        pickle.dump(results, f)
+        f.close()
+    val_score = get_test_score(results)
+    logging.info(val_score)
+
+    # grid search on hyper parameter space
+    search_res = sgd_grid_search(train_batch_names, n_train, val_X, val_y, loss, alpha, l1_ratio)
+    search_res = search_res.sort_values(by='val_f_score', ascending=False)
+    best_param = search_res.iloc[0]
+    logging.info("Best parameters selected:")
+    logging.info(best_param)
+
+    # train again on the best classifier
+    best_clf = SGDClassifier(loss=best_param[ 'loss' ],
+                             alpha=best_param[ 'alpha' ],
+                             l1_ratio=best_param[ 'l1_ratio' ],
+                             random_state=random_state,
+                             average=True)
+    classes = np.array([ 0, 1 ])
+    pbar = pyprind.ProgBar(len(train_batch_names))
+    for i, filename in enumerate(train_batch_names):
+        X_train, y_train = load_batches(filename)
+        best_clf.partial_fit(X_train, y_train, classes=classes)
+        pbar.update()
+
+    # finally test the classifier on the test set
+    best_preds = best_clf.predict(test_X)
+    final_f_score = fbeta_score(test_y, best_preds, beta=.5)
+    final_accuracy = accuracy_score(test_y, best_preds)
+    logging.info("F-score on test set: {}".format(final_f_score))
+    logging.info("Accuracy on test set: {}".format(final_accuracy))
+
+    with open('results/best_model.pickle', 'wb') as f:
+        pickle.dump(best_clf, f)
+        f.close()
 
 
 if __name__ == "__main__":
      main()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
