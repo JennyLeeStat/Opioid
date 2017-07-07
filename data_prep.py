@@ -1,3 +1,20 @@
+#
+#
+#    Copyright 2017 Jenny Lee (jennylee.stat@gmail.com)
+#
+#    Licensed under the Apache License, Version 2.0 (the "License");
+#    you may not use this file except in compliance with the License.
+#    You may obtain a copy of the License at
+#
+#        http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS,
+#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#    See the License for the specific language governing permissions and
+#    limitations under the License.
+#
+
 import os
 import sys
 import time
@@ -16,13 +33,13 @@ logging.basicConfig(
     format='%(levelname)s %(message)s',
     stream=sys.stdout, level=logging.INFO)
 
-# dataset urls
+# dataset urls ===================
 drugs_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_NPI_DRUG_15.zip"
 npi_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_NPI_15.zip"
 st_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_Drug_St_15.zip"
 ntl_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data/Downloads/PartD_Prescriber_PUF_Drug_Ntl_15.zip"
 
-# model parameters
+# model parameters ===============
 dest_dir = "dataset"
 chunk_size = 100000
 n_other_drugs = 300
@@ -186,7 +203,7 @@ def get_drug_names(ntl, drug_name_dict, n_other_drugs=n_other_drugs, random_stat
         'Number of Prescribers' ].sum()
 
     # randomly sampling subset of other drug names according to its frequency
-    np.random.RandomState(seed=random_state)
+    np.random.seed(seed=random_state)
     others_picked = np.random.choice(ntl_others[ 'Generic Name' ],
                                      size=n_other_drugs,
                                      replace=False,
@@ -318,11 +335,17 @@ def get_minibatch(drugs, npi, non_op_names, op_names):
 
     return
 
-def split_test(batch_dir=batch_dir, test_ratio=test_ratio):
+def split_test(batch_dir=batch_dir, test_ratio=test_ratio, random_state=random_state):
+    """
+    Split test set batches and training batches 
+    :param batch_dir: 
+    :param test_ratio: 
+    :return: 
+    """
     filepath_list = glob.glob(os.path.join(batch_dir, "*.pickle"))
     n_batches = len(filepath_list)
     n_test = int(test_ratio * n_batches)
-    np.random.RandomState(random_state)
+    np.random.seed(random_state)
     test_batch_names = np.random.choice(filepath_list, n_test, replace=False)
 
     # Move selected test batches to the test_batches dir
@@ -348,6 +371,7 @@ def split_test(batch_dir=batch_dir, test_ratio=test_ratio):
 
 
 def main():
+    # TODO: save drug names included in the train batches
     start = time.time()
     npi = prepare_npi(npi_url, dropna=True, add_new_features=True)
     ntl, drug_name_dict = get_drug_name_dict()
