@@ -32,15 +32,12 @@ from sklearn.linear_model import Perceptron
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.metrics import fbeta_score, accuracy_score
 
-
-import data_prep as prep
-
 plt.style.use('ggplot')
 logging.basicConfig(
     format='%(levelname)s %(message)s',
     stream=sys.stdout, level=logging.INFO)
 
-# ===== parameters ============
+# ===== parameters ==================
 random_state = 42
 batch_dir = "dataset/batches"
 test_ratio = .2
@@ -175,8 +172,8 @@ def get_time_res(results):
     for k in partial_fit_classifiers.keys():
         train_time = results[k]['train_time']
         pred_time = results[k]['pred_time']
-        mean_train_time = np.mean([5000 * t / n_train[i] for i, t in enumerate(train_time)])
-        mean_pred_time = np.mean([5000 * t / n_train[i] for i, t in enumerate(pred_time)])
+        mean_train_time = np.mean([10000 * t / n_train[i] for i, t in enumerate(train_time)])
+        mean_pred_time = np.mean([10000 * t / n_train[i] for i, t in enumerate(pred_time)])
         res.append((k, mean_train_time, mean_pred_time))
     return res
 
@@ -195,7 +192,7 @@ def plot_time(res):
                 linewidth=1, edgecolor=".2")
     plt.xlabel('')
     plt.ylabel('runtime (sec)')
-    plt.title('Runtime per 5,000 instances')
+    plt.title('Runtime per 10,000 instances')
 
     if not os.path.isdir("assets"):
         os.mkdir("assets")
@@ -231,30 +228,6 @@ def plot_score(results, window=20):
 
 
 
-def plot_test_score(results, window=3):
-    my_col = sns.color_palette("husl", 5)
-    plt.figure(figsize=(11, 11))
-    ax1 = plt.subplot(221)
-
-    for i, clf_name in enumerate(partial_fit_classifiers.keys()):
-        plt.plot(pd.Series(results[ clf_name ][ 'acc_test' ]).rolling(window=window).mean(),
-                     color=my_col[ i ], linewidth=2.5)
-    plt.ylabel("Accuracy")
-    plt.xlabel("runtime")
-    plt.title("Accuracy on validation set")
-
-    ax2 = plt.subplot(222, sharey=ax1)
-    for i, clf_name in enumerate(partial_fit_classifiers.keys()):
-        plt.plot(pd.Series(results[ clf_name ][ 'f_test' ]).rolling(window=window).mean(),
-                     color=my_col[ i ], linewidth=2.5)
-    plt.ylabel("F-score")
-    plt.xlabel("runtime")
-    plt.legend(loc="best", labels=partial_fit_classifiers.keys())
-    plt.title("F score (beta=0.5) on validation set")
-    plt.savefig("assets/compare_test_score.png")
-    plt.show()
-
-
 def get_test_score(results):
     acc_test = pd.DataFrame([ (clf, np.mean(results[ clf ][ 'acc_test' ])) for clf in partial_fit_classifiers.keys() ])
     acc_test.columns = [ 'clf', 'mean_test_acc' ]
@@ -265,35 +238,50 @@ def get_test_score(results):
     f_test = f_test.set_index('clf')
 
     test_score = acc_test.join(f_test)
-    test_score = test_score.sort_values(by='mean_test_acc')
+    test_score = test_score.sort_values(by='mean_test_acc', ascending=False)
     return test_score
 
 
+def eval_val_error(clf, val_batch_names):
+    val_errors = []
+    for val_name in val_batch_names:
+        X_val, y_val = load_batches(val_name)
+        pred_val = clf.predict(X_val)
+        val_errors.append(fbeta_score(y_val, pred_val, beta=.5))
+    return np.mean(val_errors)
 
-def sgd_grid_search(train_batch_names, n_train, X_val, y_val, loss, alpha, l1_ratio, save_res=True):
+
+def sgd_grid_search(train_batch_names, val_batch_names, loss, alpha, l1_ratio, save_res=True):
     classes = np.array([ 0, 1 ])
-    files_to_read = train_batch_names[ :n_train ]
     params = list(itertools.product(alpha, l1_ratio))
     params_ = list(itertools.product(loss, params))
     param_dict = [ {'loss': c[ 0 ],
                     'alpha': c[ 1 ][ 0 ],
                     'l1_ratio': c[ 1 ][ 1 ],
                     'val_f_score': 0.} for c in params_ ]
+
     start = time.time()
     for i, p in enumerate(param_dict):
         clf = SGDClassifier(loss=p[ 'loss' ], alpha=p[ 'alpha' ], l1_ratio=p[ 'l1_ratio' ],
+                            penalty='elasticnet',
                             random_state=random_state)
         print('')
-        logging.info("{}/{} Evaluating hyperparameters: {}".format(i + 1, len(param_dict), p))
-        for i, filename in enumerate(files_to_read):
+        logging.info("{}/{} Evaluating hyperparameters: ".format(i + 1, len(param_dict)))
+        logging.info("loss: {}, alpha: {}, l1_ratio: {}".format(p[ 'loss' ], p[ 'alpha' ], p[ 'l1_ratio' ]))
+
+        for i, filename in enumerate(train_batch_names):
             X_train, y_train = load_batches(filename)
             clf.partial_fit(X_train, y_train, classes=classes)
-            pred_val = clf.predict(X_val)
-            p[ 'val_f_score' ] = fbeta_score(y_val, pred_val, beta=.5)
-            sys.stdout.write("\r>> Progress:" + str(100 * (i + 1) / float((len(files_to_read))))[ :4 ] + "%")
-            sys.stdout.flush()
-            logging.info("Validation F-score: {}".format(p[ 'val_f_score' ]))
-    logging.info("Total time elapsed: {}".format(time.time() - start))
+
+            # sys.stdout.write("\rProgress:" + str(100 * (i + 1) / float((len(train_batch_names))))[ :4 ] + "%")
+            # sys.stdout.flush()
+
+        val_errors = eval_val_error(clf)
+        p[ 'val_f_score' ] = val_errors
+        logging.info('Validation F-score: {}'.format(val_errors))
+
+    logging.info("Total time elapsed: {} seconds".format(time.time() - start))
+
     res = pd.DataFrame(param_dict)
     if save_res:
         pickle_name = 'grid_search.pickle'
@@ -301,8 +289,8 @@ def sgd_grid_search(train_batch_names, n_train, X_val, y_val, loss, alpha, l1_ra
             pickle.dump(res, f)
         f.close()
         logging.info("grid seach result is saved as: {}".format(pickle_name))
-    return res
 
+    return res
 
 
 #
