@@ -1,5 +1,4 @@
 #
-#
 #    Copyright 2017 Jenny Lee (jennylee.stat@gmail.com)
 #
 #    Licensed under the Apache License, Version 2.0 (the "License");
@@ -41,7 +40,8 @@ ntl_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statisti
 
 # model parameters ===============
 dest_dir = "dataset"
-chunk_size = 100000
+other_drugs_thresh = 1000
+chunk_size = 30000
 n_other_drugs = 300
 n_batches_to_try = 10000
 batch_length = 32
@@ -145,7 +145,7 @@ def prepare_npi(npi_url, dropna=True, add_new_features=True, verbose=True):
     return npi
 
 
-def get_drug_name_dict(threshold=500):
+def get_drug_name_dict(threshold=other_drugs_thresh):
     """
 
     :param threshold: drug names are dropped if number of prescribers is smaller than threshold
@@ -215,6 +215,7 @@ def get_drug_names(ntl, drug_name_dict, n_other_drugs=n_other_drugs, random_stat
     imp_names = [ item for key in cats_to_flatten for item in drug_name_dict[ key ] ]
     non_op_names = others_picked + imp_names
     op_names = drug_name_dict[ 'Opioid Drug Flag' ]
+    non_op_names = np.setdiff1d(non_op_names, op_names).tolist()
     return non_op_names, op_names
 
 
@@ -224,9 +225,17 @@ def minmax_scaler(X):
     :param X: a pandas series of feature
     :return: scaled feature
     """
+    logX = np.log(X + 1)
     X_std = (X - X.min()) / (X.max() - X.min())
     X_std = X_std.fillna(0)
     return X_std
+
+
+def standardize(X):
+    logX = np.log(X + 1)
+    mu, std = X.mean(), X.std()
+    logX_std = (logX - mu) / std
+    return logX_std.fillna(0)
 
 
 def save_objects(features, labels, i):
@@ -276,7 +285,7 @@ def clean_drug_chunks(drugs, npi, non_op_names, op_names, scale=True, chunk_size
                              values=small[ 'avg_day_supply' ],
                              aggfunc=np.mean)
 
-    drug_names = set(op_names + non_op_names)
+    drug_names = op_names + non_op_names
     wide_table = wide_table.loc[ :, drug_names ]
     wide_table = wide_table.fillna(0)
     wide_table.index.name = 'npi'
@@ -379,7 +388,7 @@ def main():
     drugs = download_drugs()
     get_minibatch(drugs, npi, non_op_names, op_names)
     split_test()
-    logging.info("Time elapsed: {}".format(time.time() - start))
+    logging.info("Time elapsed: {} seconds".format(time.time() - start))
     return
 
 
