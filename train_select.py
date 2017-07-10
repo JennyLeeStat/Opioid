@@ -57,7 +57,7 @@ partial_fit_classifiers = {
 }
 
 
-def get_batchnames():
+def get_batchnames(split_val=True):
     """
     shuffle train and test set then split train set further to train set and validation set
     :return: pickle filenames of train/validation/test batches
@@ -67,14 +67,20 @@ def get_batchnames():
     test_batch_names = np.random.choice(test_batch_names, len(test_batch_names), replace=False)
     train_batch_names = glob.glob(os.path.join('dataset/batches/train_batches', '*.pickle'))
     train_batch_names = np.random.choice(train_batch_names, len(train_batch_names), replace=False)
-    val_batch_names = np.random.choice(
-        train_batch_names, int(val_ratio * len(train_batch_names)), replace=False)
-    train_batch_names = np.setdiff1d(train_batch_names, val_batch_names)
 
-    print("number of train batches: {}".format(len(train_batch_names)))
-    print("Number of validation batches: {}".format(len(val_batch_names)))
-    print("number of test batches: {}".format(len(test_batch_names)))
-    return train_batch_names, test_batch_names, val_batch_names
+    if split_val:
+        val_batch_names = np.random.choice(
+            train_batch_names, int(val_ratio * len(train_batch_names)), replace=False)
+        train_batch_names = np.setdiff1d(train_batch_names, val_batch_names)
+
+        print("number of train batches: {}".format(len(train_batch_names)))
+        print("Number of validation batches: {}".format(len(val_batch_names)))
+        print("number of test batches: {}".format(len(test_batch_names)))
+        return train_batch_names.tolist(), test_batch_names.tolist(), val_batch_names.tolist()
+    else:
+        print("number of train batches: {}".format(len(train_batch_names)))
+        print("number of test batches: {}".format(len(test_batch_names)))
+        return train_batch_names.tolist(), test_batch_names.tolist()
 
 
 def load_batches(filename):
@@ -83,6 +89,18 @@ def load_batches(filename):
         label = pickle.load(f)
         f.close()
     return features, label
+
+
+def batch_features_labels(features, labels, batch_size):
+    for start in range(0, len(features), batch_size):
+        end = min(start + batch_size, len(features))
+        yield features[start:end], labels[start:end]
+
+
+def load_train_batches(train_batch_names, batch_id, batch_size):
+    filename = train_batch_names[batch_id]
+    features, labels = load_batches(filename)
+    return batch_features_labels(features, labels, batch_size)
 
 
 def concat_batches(batch_names):
@@ -242,7 +260,7 @@ def get_test_score(results):
     return test_score
 
 
-def eval_val_error(clf, val_batch_names):
+def eval_test_error(clf, val_batch_names):
     val_errors = []
     for val_name in val_batch_names:
         X_val, y_val = load_batches(val_name)
@@ -251,7 +269,7 @@ def eval_val_error(clf, val_batch_names):
     return np.mean(val_errors)
 
 
-def sgd_grid_search(train_batch_names, val_batch_names, loss, alpha, l1_ratio, save_res=True):
+def sgd_grid_search(train_batch_names, val_batch_names, loss, alpha, l1_ratio, random_state, save_res=True):
     classes = np.array([ 0, 1 ])
     params = list(itertools.product(alpha, l1_ratio))
     params_ = list(itertools.product(loss, params))
@@ -263,8 +281,7 @@ def sgd_grid_search(train_batch_names, val_batch_names, loss, alpha, l1_ratio, s
     start = time.time()
     for i, p in enumerate(param_dict):
         clf = SGDClassifier(loss=p[ 'loss' ], alpha=p[ 'alpha' ], l1_ratio=p[ 'l1_ratio' ],
-                            penalty='elasticnet',
-                            random_state=random_state)
+                            penalty='elasticnet', random_state=random_state)
         print('')
         logging.info("{}/{} Evaluating hyperparameters: ".format(i + 1, len(param_dict)))
         logging.info("loss: {}, alpha: {}, l1_ratio: {}".format(p[ 'loss' ], p[ 'alpha' ], p[ 'l1_ratio' ]))
@@ -276,11 +293,21 @@ def sgd_grid_search(train_batch_names, val_batch_names, loss, alpha, l1_ratio, s
             # sys.stdout.write("\rProgress:" + str(100 * (i + 1) / float((len(train_batch_names))))[ :4 ] + "%")
             # sys.stdout.flush()
 
-        val_errors = eval_val_error(clf)
+        val_errors = eval_test_error(clf, val_batch_names)
         p[ 'val_f_score' ] = val_errors
         logging.info('Validation F-score: {}'.format(val_errors))
 
     logging.info("Total time elapsed: {} seconds".format(time.time() - start))
+
+    res = pd.DataFrame(param_dict)
+    if save_res:
+        pickle_name = 'grid_search.pickle'
+        with open(pickle_name, 'wb') as f:
+            pickle.dump(res, f)
+        f.close()
+        logging.info("grid seach result is saved as: {}".format(pickle_name))
+
+    return res
 
     res = pd.DataFrame(param_dict)
     if save_res:
