@@ -41,7 +41,7 @@ ntl_url = "http://download.cms.gov/Research-Statistics-Data-and-Systems/Statisti
 # model parameters ===============
 dest_dir = "dataset"
 other_drugs_thresh = 1000
-chunk_size = 30000
+chunk_size = 300000
 n_other_drugs = 300
 n_batches_to_try = 10000
 batch_length = 32
@@ -137,10 +137,10 @@ def prepare_npi(npi_url, dropna=True, add_new_features=True, verbose=True):
             logging.info("New features are added")
 
     npi = npi.set_index('npi')
-    filename2 = filename.split(".")[ 0 ] + "_clean.csv"
-    npi.to_csv(filename2)
-    logging.info("prescriber summary dataset is prepared and")
-    logging.info("saved at {}".format(filename2))
+    # filename2 = filename.split(".")[ 0 ] + "_clean.csv"
+    # npi.to_csv(filename2)
+    # logging.info("prescriber summary dataset is prepared and")
+    # logging.info("saved at {}".format(filename2))
 
     return npi
 
@@ -199,7 +199,7 @@ def get_drug_names(ntl, drug_name_dict, n_other_drugs=n_other_drugs, random_stat
 
     other_names = drug_name_dict[ 'others' ]
     ntl_others = ntl_small.loc[ ntl_small[ 'Generic Name' ].isin(other_names), : ]
-    ntl_others[ 'Number of Prescribers' ] = ntl_others[ 'Number of Prescribers' ] / ntl_others[
+    ntl_others[ 'prob_Number of Prescribers' ] = ntl_others[ 'Number of Prescribers' ] / ntl_others[
         'Number of Prescribers' ].sum()
 
     # randomly sampling subset of other drug names according to its frequency
@@ -207,15 +207,15 @@ def get_drug_names(ntl, drug_name_dict, n_other_drugs=n_other_drugs, random_stat
     others_picked = np.random.choice(ntl_others[ 'Generic Name' ],
                                      size=n_other_drugs,
                                      replace=False,
-                                     p=ntl_others[ 'Number of Prescribers' ]).tolist()
+                                     p=ntl_others[ 'prob_Number of Prescribers' ]).tolist()
 
     # antibiotic, hrm, and antipsych drugs are all included
     cats_to_flatten = [ 'Antibiotic Drug Flag', 'High Risk Medication (HRM) Drug Flag',
                         'Antipsychotic Drug Flag' ]
     imp_names = [ item for key in cats_to_flatten for item in drug_name_dict[ key ] ]
     non_op_names = others_picked + imp_names
-    op_names = drug_name_dict[ 'Opioid Drug Flag' ]
-    non_op_names = np.setdiff1d(non_op_names, op_names).tolist()
+    op_names = np.unique(drug_name_dict[ 'Opioid Drug Flag' ].tolist())
+    non_op_names = np.unique(np.setdiff1d(non_op_names, op_names).tolist())
     return non_op_names, op_names
 
 
@@ -225,8 +225,9 @@ def minmax_scaler(X):
     :param X: a pandas series of feature
     :return: scaled feature
     """
+    X = X.fillna(0)
     logX = np.log(X + 1)
-    X_std = (X - X.min()) / (X.max() - X.min())
+    X_std = (logX - logX.min()) / (logX.max() - logX.min())
     X_std = X_std.fillna(0)
     return X_std
 
@@ -358,14 +359,16 @@ def split_test(batch_dir=batch_dir, test_ratio=test_ratio, random_state=random_s
     test_batch_names = np.random.choice(filepath_list, n_test, replace=False)
 
     # Move selected test batches to the test_batches dir
-    if not os.path.isdir('dataset/batches/test_batches'): os.mkdir('dataset/batches/test_batches')
+    if not os.path.isdir('dataset/batches/test_batches'):
+        os.mkdir('dataset/batches/test_batches')
     new_test_batch_names = [ (b, os.path.join('dataset/batches/test_batches', b.split("/")[ -1 ])) \
                              for b in test_batch_names ]
     for names in new_test_batch_names:
         os.rename(names[ 0 ], names[ 1 ])
 
     # Move remaining batches to the training_batcehs
-    if not os.path.isdir('dataset/batches/train_batches'): os.mkdir('dataset/batches/train_batches')
+    if not os.path.isdir('dataset/batches/train_batches'):
+        os.mkdir('dataset/batches/train_batches')
     train_batch_names = np.setdiff1d(filepath_list, test_batch_names)
     new_train_batch_names = [ (b, os.path.join('dataset/batches/train_batches', b.split("/")[ -1 ])) \
                               for b in train_batch_names ]
@@ -380,7 +383,7 @@ def split_test(batch_dir=batch_dir, test_ratio=test_ratio, random_state=random_s
 
 
 def main():
-    # TODO: save drug names included in the train batches
+    # TODO: save drug names included in the train batches in csv format
     start = time.time()
     npi = prepare_npi(npi_url, dropna=True, add_new_features=True)
     ntl, drug_name_dict = get_drug_name_dict()
