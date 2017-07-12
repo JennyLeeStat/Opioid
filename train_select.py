@@ -31,6 +31,9 @@ from sklearn.linear_model import PassiveAggressiveClassifier
 from sklearn.linear_model import Perceptron
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.metrics import fbeta_score, accuracy_score
+from sklearn.utils import shuffle
+
+import data_prep as prep
 
 plt.style.use('ggplot')
 logging.basicConfig(
@@ -42,8 +45,10 @@ random_state = 42
 batch_dir = "dataset/batches"
 test_ratio = .2
 val_ratio = .15
-validate_every = 25
-print_every = 25
+batch_size = 256
+validate_every = 50
+print_every = batch_size * 2
+
 loss = ['hinge', 'log']
 alpha = [.000001, .00001, .0001, .001]
 l1_ratio = [0., .1, .2, .3, .4, .5, .6, .7, .8, .9]
@@ -72,6 +77,7 @@ def get_batchnames(split_val=True):
         val_batch_names = np.random.choice(
             train_batch_names, int(val_ratio * len(train_batch_names)), replace=False)
         train_batch_names = np.setdiff1d(train_batch_names, val_batch_names)
+        train_batch_names = np.random.choice(train_batch_names, len(train_batch_names), replace=False)
 
         print("number of train batches: {}".format(len(train_batch_names)))
         print("Number of validation batches: {}".format(len(val_batch_names)))
@@ -97,10 +103,18 @@ def batch_features_labels(features, labels, batch_size):
         yield features[start:end], labels[start:end]
 
 
-def load_train_batches(train_batch_names, batch_id, batch_size):
+def load_train_batches(train_batch_names, batch_id, batch_size, random_state=random_state):
     filename = train_batch_names[batch_id]
     features, labels = load_batches(filename)
+    features, labels = shuffle(features, labels, random_state=random_state)
+
     return batch_features_labels(features, labels, batch_size)
+
+
+def load_random_test_batch(test_features, test_labels, batch_size):
+    np.random.seed(random_state)
+    idx = np.random.choice(len(test_features), batch_size)
+    return test_features.iloc[idx, :], test_labels[idx].reshape(batch_size, 1)
 
 
 def concat_batches(batch_names):
@@ -136,53 +150,50 @@ def initialize_stats(partial_fit_classifiers):
     return results
 
 
-def train_predict(partial_fit_classifiers, train_batch_names):
+def train_predict(partial_fit_classifiers, train_batch_names, val_features, val_labels):
     classes = np.array([ 0, 1 ])
     results = initialize_stats(partial_fit_classifiers)
+    steps = 0
 
-    for i, filename in enumerate(train_batch_names):
-        X_train, y_train = load_batches(filename)
-
-        for clf_name, clf in partial_fit_classifiers.items():
-            # train via partial fit
-            tick = time.time()
-            clf.partial_fit(X_train, y_train, classes=classes)
-            train_time = time.time() - tick
-
-            # predict
-            tick = time.time()
-            pred_train = clf.predict(X_train)
-            pred_time = time.time() - tick
-
-            if i % validate_every == 0 and i > 0:
-                X_val, y_val = X_train, y_train
-                pred_val = clf.predict(X_val)
-                results[ clf_name ][ 'acc_test' ].append(accuracy_score(y_val, pred_val))
-                results[ clf_name ][ 'f_test' ].append(fbeta_score(y_val, pred_val, beta=.5))
-
-            else:
+    for batch_i in range(len(train_batch_names)):
+        for X_train, y_train in load_train_batches(train_batch_names, batch_i, batch_size):
+            for clf_name, clf in partial_fit_classifiers.items():
+                steps += 1
+                # train via partial fit
+                tick = time.time()
                 clf.partial_fit(X_train, y_train, classes=classes)
-                pred_train = clf.predict(X_train)
+                train_time = time.time() - tick
 
+                # predict
+                tick = time.time()
+                pred_train = clf.predict(X_train)
+                pred_time = time.time() - tick
+
+                pred_train = clf.predict(X_train)
                 results[ clf_name ][ 'train_time' ].append(train_time)
                 results[ clf_name ][ 'pred_time' ].append(pred_time)
                 results[ clf_name ][ 'n_train' ].append(X_train.shape[ 0 ])
                 results[ clf_name ][ 'acc_train' ].append(accuracy_score(y_train, pred_train))
                 results[ clf_name ][ 'f_train' ].append(fbeta_score(y_train, pred_train, beta=.5))
 
-        if i % print_every == 0 and i > 0:
-            logging.info("batch {} / {}".format(i + 1, len(train_batch_names)))
-            logging.info("Number of validation sample: {}".format(X_train.shape[ 0 ]))
-            logging.info("===== F-beta score (beta=0.5) ======================")
-            logging.info("SGD-SVM: {}".format(results[ 'SGD-SVM' ][ 'f_train' ][ -1 ]))
-            logging.info("SGD-Log: {}".format(results[ 'SGD-Log' ][ 'f_train' ][ -1 ]))
-            logging.info("Perceptron: {}".format(results[ 'Perceptron' ][ 'f_train' ][ -1 ]))
-            logging.info("NB Multinomial: {}".format(results[ 'NB Multinomial' ][ 'f_train' ][ -1 ]))
-            logging.info("PA: {}".format(results[ 'Passive-Aggressive' ][ 'f_train' ][ -1 ]))
-            logging.info("====================================================")
+        X_val, y_val = load_random_test_batch(val_features, val_labels, batch_size)
+        for clf_name, clf in partial_fit_classifiers.items():
+            pred_val = clf.predict(X_val)
+            results[ clf_name ][ 'acc_test' ].append(accuracy_score(y_val, pred_val))
+            results[ clf_name ][ 'f_test' ].append(fbeta_score(y_val, pred_val, beta=.5))
+
+        logging.info(
+            "batch {} / {} ================================".format(batch_i + 1, len(train_batch_names)))
+        logging.info("Number of validation sample: {}".format(X_train.shape[ 0 ]))
+        logging.info("F-beta score (beta=0.5) on training set:")
+        logging.info("SGD-SVM: {}".format(results[ 'SGD-SVM' ][ 'f_train' ][ -1 ]))
+        logging.info("SGD-Log: {}".format(results[ 'SGD-Log' ][ 'f_train' ][ -1 ]))
+        logging.info("Perceptron: {}".format(results[ 'Perceptron' ][ 'f_train' ][ -1 ]))
+        logging.info("NB Multinomial: {}".format(results[ 'NB Multinomial' ][ 'f_train' ][ -1 ]))
+        logging.info("PA: {}".format(results[ 'Passive-Aggressive' ][ 'f_train' ][ -1 ]))
+        # logging.info("==========================================")
 
     return results
-
 
 def get_time_res(results):
     n_train = results['SGD-SVM']['n_train']
@@ -223,53 +234,61 @@ def plot_score(results, window=20):
     my_col = sns.color_palette("husl", 5)
     plt.figure(figsize=(11, 11))
     ax1 = plt.subplot(221)
-    n = np.cumsum(results[ 'SGD-SVM' ][ 'n_train' ])
-    len_n = len(n)
+
     for i, clf_name in enumerate(partial_fit_classifiers.keys()):
-        plt.plot(n, pd.Series(results[ clf_name ][ 'acc_train' ][ :len_n ]).rolling(window=window).mean(),
+        plt.plot(pd.Series(results[ clf_name ][ 'acc_train' ]).rolling(window=window).mean(),
                  color=my_col[ i ], linewidth=2.5)
     plt.ylabel("Accuracy")
-    plt.xlabel("Training samples (#)")
+    plt.xlabel("Training steps")
     plt.legend(loc="best", labels=partial_fit_classifiers.keys())
     plt.title("Accuracy on training set")
 
     ax2 = plt.subplot(222, sharey=ax1)
     for i, clf_name in enumerate(partial_fit_classifiers.keys()):
-        plt.plot(n, pd.Series(results[ clf_name ][ 'f_train' ][ :len_n ]).rolling(window=window).mean(),
+        plt.plot(pd.Series(results[ clf_name ][ 'f_train' ]).rolling(window=window).mean(),
                  color=my_col[ i ], linewidth=2.5)
     plt.ylabel("F-score")
-    plt.xlabel("Training samples (#)")
-    #plt.legend(loc="best", labels=partial_fit_classifiers.keys())
+    plt.xlabel("Training steps")
+    # plt.legend(loc="best", labels=partial_fit_classifiers.keys())
     plt.title("F score (beta=0.5) on training set")
     plt.savefig("assets/compare_score.png")
     plt.show()
 
 
-
 def get_test_score(results):
-    acc_test = pd.DataFrame([ (clf, np.mean(results[ clf ][ 'acc_test' ])) for clf in partial_fit_classifiers.keys() ])
-    acc_test.columns = [ 'clf', 'mean_test_acc' ]
-    acc_test = acc_test.set_index('clf')
-
-    f_test = pd.DataFrame([ (clf, np.mean(results[ clf ][ 'f_test' ])) for clf in partial_fit_classifiers.keys() ])
-    f_test.columns = [ 'clf', 'mean_test_f' ]
-    f_test = f_test.set_index('clf')
-
-    test_score = acc_test.join(f_test)
-    test_score = test_score.sort_values(by='mean_test_acc', ascending=False)
-    return test_score
-
-
-def eval_test_error(clf, val_batch_names):
-    val_errors = []
-    for val_name in val_batch_names:
-        X_val, y_val = load_batches(val_name)
-        pred_val = clf.predict(X_val)
-        val_errors.append(fbeta_score(y_val, pred_val, beta=.5))
-    return np.mean(val_errors)
+    acc_test = {}
+    f_test = {}
+    for clf_names in partial_fit_classifiers.keys():
+        acc_test[clf_names] = results[clf_names]['acc_test']
+        f_test[clf_names] = results[clf_names]['f_test']
+    acc_test = pd.DataFrame(acc_test)
+    f_test = pd.DataFrame(f_test)
+    f_test_mean = pd.DataFrame(f_test.mean())
+    f_test_mean.columns = ['f_test_mean']
+    acc_test_mean = pd.DataFrame(acc_test.mean())
+    acc_test_mean.columns = ['acc_test_mean']
+    mean_scores = acc_test_mean.join(f_test_mean).sort_values(by='f_test_mean', ascending=False)
+    return mean_scores, acc_test, f_test
 
 
-def sgd_grid_search(train_batch_names, val_batch_names, loss, alpha, l1_ratio, random_state, save_res=True):
+def eval_error(clf, val_features, val_labels, n_to_try=100):
+    val_fscore = [ ]
+    val_accuracy = [ ]
+    try:
+        for _ in range(n_to_try):
+            X_val, y_val = load_random_test_batch(val_features, val_labels, batch_size)
+            pred_val = clf.predict(X_val)
+            val_fscore.append(fbeta_score(y_val, pred_val, beta=.5))
+            val_accuracy.append(accuracy_score(y_val, pred_val))
+
+    except StopIteration:
+        return None
+
+    return np.mean(val_fscore), np.mean(val_accuracy)
+
+
+def sgd_grid_search(train_batch_names, val_features, val_labels,
+                    loss, alpha, l1_ratio, random_state, save_res=True):
     classes = np.array([ 0, 1 ])
     params = list(itertools.product(alpha, l1_ratio))
     params_ = list(itertools.product(loss, params))
@@ -286,22 +305,19 @@ def sgd_grid_search(train_batch_names, val_batch_names, loss, alpha, l1_ratio, r
         logging.info("{}/{} Evaluating hyperparameters: ".format(i + 1, len(param_dict)))
         logging.info("loss: {}, alpha: {}, l1_ratio: {}".format(p[ 'loss' ], p[ 'alpha' ], p[ 'l1_ratio' ]))
 
-        for i, filename in enumerate(train_batch_names):
-            X_train, y_train = load_batches(filename)
-            clf.partial_fit(X_train, y_train, classes=classes)
+        for batch_i in range(len(train_batch_names)):
+            for X_train, y_train in load_train_batches(train_batch_names, batch_i, batch_size):
+                clf.partial_fit(X_train, y_train, classes=classes)
 
-            # sys.stdout.write("\rProgress:" + str(100 * (i + 1) / float((len(train_batch_names))))[ :4 ] + "%")
-            # sys.stdout.flush()
-
-        val_errors = eval_test_error(clf, val_batch_names)
-        p[ 'val_f_score' ] = val_errors
-        logging.info('Validation F-score: {}'.format(val_errors))
+        val_fscore, val_accuracy = eval_error(clf, val_features, val_labels)
+        p[ 'val_f_score' ] = val_fscore
+        logging.info('Validation F-score: {}'.format(val_fscore))
 
     logging.info("Total time elapsed: {} seconds".format(time.time() - start))
 
     res = pd.DataFrame(param_dict)
     if save_res:
-        pickle_name = 'grid_search.pickle'
+        pickle_name = 'results/grid_search_res.pickle'
         with open(pickle_name, 'wb') as f:
             pickle.dump(res, f)
         f.close()
@@ -319,62 +335,52 @@ def sgd_grid_search(train_batch_names, val_batch_names, loss, alpha, l1_ratio, r
 
     return res
 
+def main():
+    npi = prep.prepare_npi(prep.npi_url)
 
-#
-# def main():
-#     npi = prep.prepare_npi(prep.npi_url)
-#     train_batch_names, test_batch_names = get_batchnames()
-#
-#     # splitting validation batches and test batches
-#     val_X, val_y = concat_batches(train_batch_names[ n_train: ])
-#     test_X, test_y = concat_batches(test_batch_names)
-#     logging.info("In validation set, number of instances: {}".format(len(val_X)))
-#     logging.info("In test set, number of instances: {}".format(len(test_X)))
-#
-#     # train on candidate classifiers
-#     results = train_predict(partial_fit_classifiers, train_batch_names, n_train=n_train)
-#
-#     with open('results/results_five_classifiers.pickle', 'wb') as f:
-#         pickle.dump(results, f)
-#         f.close()
-#     val_score = get_test_score(results)
-#     logging.info(val_score)
-#
-#     # grid search on hyper parameter space
-#     search_res = sgd_grid_search(train_batch_names, n_train, val_X, val_y, loss, alpha, l1_ratio)
-#     search_res = search_res.sort_values(by='val_f_score', ascending=False)
-#     best_param = search_res.iloc[0]
-#     logging.info("Best parameters selected:")
-#     logging.info(best_param)
-#
-#     # train again on the best classifier
-#     best_clf = SGDClassifier(loss=best_param[ 'loss' ],
-#                              alpha=best_param[ 'alpha' ],
-#                              l1_ratio=best_param[ 'l1_ratio' ],
-#                              random_state=random_state,
-#                              average=True)
-#     classes = np.array([ 0, 1 ])
-#     pbar = pyprind.ProgBar(len(train_batch_names))
-#     for i, filename in enumerate(train_batch_names):
-#         X_train, y_train = load_batches(filename)
-#         best_clf.partial_fit(X_train, y_train, classes=classes)
-#         pbar.update()
-#
-#     # finally test the classifier on the test set
-#     best_preds = best_clf.predict(test_X)
-#     final_f_score = fbeta_score(test_y, best_preds, beta=.5)
-#     final_accuracy = accuracy_score(test_y, best_preds)
-#     logging.info("F-score on test set: {}".format(final_f_score))
-#     logging.info("Accuracy on test set: {}".format(final_accuracy))
-#
-#     with open('results/best_model.pickle', 'wb') as f:
-#         pickle.dump(best_clf, f)
-#         f.close()
-#
-#
-# if __name__ == "__main__":
-#      main()
-#
+    # split data batches
+    train_batch_names, test_batch_names, val_batch_names = get_batchnames(split_val=True)
+    val_features, val_labels = concat_batches(val_batch_names)
+    test_features, test_labels = concat_batches(test_batch_names)
+
+    # select the best model
+    results = train_predict(partial_fit_classifiers, train_batch_names, val_features, val_labels)
+    mean_scores, _, _ = get_test_score(results)
+    logging.info("Avg test scores: {}".format(mean_scores))
+
+    search_res = sgd_grid_search(train_batch_names, val_features, val_labels, loss, alpha, l1_ratio, random_state)
+    best_param = search_res.sort_values(by='val_f_score', ascending=False).iloc[ 0 ]
+    logging.info("Best parameters selected: {}".format(best_param))
+
+    # retrain the best model with all training samples
+    train_batch_names, _ = get_batchnames(split_val=False)
+    best_clf = SGDClassifier(loss=best_param[ 'loss' ],
+                             alpha=best_param[ 'alpha' ],
+                             l1_ratio=best_param[ 'l1_ratio' ],
+                             random_state=random_state,
+                             average=True)
+    classes = np.array([ 0, 1 ])
+
+    pbar = pyprind.ProgBar(len(train_batch_names))
+    for batch_i in range(len(train_batch_names)):
+        for X_train, y_train in load_train_batches(train_batch_names, batch_i, batch_size):
+            best_clf.partial_fit(X_train, y_train, classes=classes)
+        pbar.update()
+
+    final_f_score, final_accuracy = eval_error(best_clf, test_features, test_labels)
+    logging.info("Test F-score: {}".format(final_f_score))
+    logging.info("Test accuracy: {}".format(final_accuracy))
+
+    filename = 'results/best_model.pickle'
+    with open(filename, 'wb') as f:
+        pickle.dump(best_clf, f)
+    logging.info("Best model is saved as {}".format(filename))
+
+
+
+if __name__ == "__main__":
+     main()
+
 #
 
 
