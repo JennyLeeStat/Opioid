@@ -26,12 +26,6 @@ logging.basicConfig(
     stream=sys.stdout, level=logging.INFO)
 
 
-
-opioids = pd.read_csv("dataset/opioids.csv")
-overdose = pd.read_csv("dataset/overdoses.csv", thousands = ',')
-prescriber = pd.read_csv("dataset/prescriber-info.csv")
-
-
 def download_and_decompress(url, dest_dir):
     """
     fetch the dataset from the CMS webpage

@@ -36,7 +36,7 @@ improve the performance.
 | Classifier | Test accuracy | Test F-beta(0.5)|
 | ------------- | ------------- |-------------|
 | SGD-Log  | 0.8751  | 0.6661|
-| DNN  | 0.8782  | 0.6711|
+| DNN  | 0.8789  | 0.6749|
 
  The accuracy is not ‘perfect’ because we set the labels by categorizing continuous variable (average days of opioid supply) with an arbitrary threshold (84 days). 
  
