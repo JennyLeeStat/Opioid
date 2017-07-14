@@ -21,6 +21,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
+import pyprind
 
 from sklearn.metrics import fbeta_score
 import tensorflow as tf
@@ -45,23 +46,21 @@ val_every = 50
 write_every = 1
 print_every = 500
 
-
 def load_random_test_batch(test_features, test_labels, batch_size):
     idx = np.random.choice(len(test_features), batch_size)
-    return test_features.iloc[idx, :], test_labels[idx].reshape(batch_size, 1)
+    return test_features.iloc[idx, :], labels_to_2d(test_labels[idx])
 
 
 def batch_features_labels(features, labels, batch_size):
     for start in range(0, len(features), batch_size):
         end = min(start + batch_size, len(features))
-        yield features[start:end], labels[start:end].reshape(end-start, 1)
+        yield features[start:end], labels_to_2d(labels[start:end])
 
 
 def load_train_batches(train_batch_names, batch_id, batch_size):
     filename = train_batch_names[batch_id]
     features, labels = ts.load_batches(filename)
     return batch_features_labels(features, labels, batch_size)
-
 
 def labels_to_2d(labels):
     tmp = np.zeros((len(labels), 2), np.int32)
@@ -116,8 +115,8 @@ def train():
 
         # evaluation metrics
         accuracy = tf.contrib.metrics.accuracy(labels=y, predictions=preds)
-        recall, recall_update_op = tf.contrib.metrics.streaming_recall(labels=y, predictions=preds)
-        precision, precision_update_op = tf.contrib.metrics.streaming_precision(labels=y, predictions=preds)
+        #recall, recall_update_op = tf.contrib.metrics.streaming_recall(labels=y, predictions=preds)
+        #precision, precision_update_op = tf.contrib.metrics.streaming_precision(labels=y, predictions=preds)
 
         stats = {
             'steps': [ ],
@@ -167,39 +166,72 @@ def train():
 
     return stats
 
-def plot_score(stats, windows=1000):
+
+def plot_score(stats, windows=100):
     res = pd.DataFrame(stats)
+    res = res.loc[ :, [ 'steps', 'loss', 'acc_train', 'acc_val', 'f_train', 'f_val' ] ]
     my_col = sns.color_palette("husl", 3)
-    plt.figure(figsize=(11, 7))
+    plt.figure(figsize=(12, 6))
     ax1 = plt.subplot(131)
     plt.plot(res[ 'steps' ], res[ 'acc_train' ].rolling(window=windows).mean(),
              color=my_col[ 0 ], linewidth=2.5)
-    plt.plot(res[ 'steps' ], res[ 'acc_val' ].rolling(window=windows * 5).mean(),
+    plt.plot(res[ 'steps' ], res[ 'acc_val' ].rolling(window=windows).mean(),
              color=my_col[ 1 ], linewidth=2.5)
     plt.ylabel("Accuracy")
     plt.xlabel("Training steps")
     plt.legend(loc="best")
-    plt.title("Accuracy on training set")
+    plt.title("Accuracy")
 
     ax2 = plt.subplot(132, sharey=ax1)
     plt.plot(res[ 'steps' ], res[ 'f_train' ].rolling(window=windows).mean(),
              color=my_col[ 0 ], linewidth=2.5)
-    plt.plot(res[ 'steps' ], res[ 'f_val' ].rolling(window=windows * 5).mean(),
+    plt.plot(res[ 'steps' ], res[ 'f_val' ].rolling(window=windows).mean(),
              color=my_col[ 1 ], linewidth=2.5)
     plt.ylabel("F-score")
     plt.xlabel("Training steps")
     plt.legend(loc="best")
-    plt.title("F score (beta=0.5) on training set")
+    plt.title("F score (beta=0.5)")
 
     ax3 = plt.subplot(133)
     plt.plot(res[ 'steps' ], res[ 'loss' ].rolling(window=windows).mean(), color=my_col[ 2 ])
     plt.xlabel("Training steps")
     plt.title("Loss")
-
-    if not os.path.isdir('assets'):
-        os.mkdir('assets')
-    plt.savefig("assets/nn_compare_score.png")
+    # plt.savefig("assets/nn_compare_score.png")
     plt.show()
+
+
+def test_model(saved_model_path, test_batch_names):
+    loaded_graph = tf.Graph()
+    with tf.Session(graph=loaded_graph) as sess:
+        # saver.restore(sess, saved_model_path)
+        loader = tf.train.import_meta_graph(saved_model_path + '.meta')
+        loader.restore(sess, saved_model_path)
+        loaded_X = loaded_graph.get_tensor_by_name('X:0')
+        loaded_y = loaded_graph.get_tensor_by_name('y:0')
+        loaded_keep_prob = loaded_graph.get_tensor_by_name('keep_prob:0')
+        loaded_preds = loaded_graph.get_tensor_by_name('loss/preds:0')
+        loaded_acc = loaded_graph.get_tensor_by_name('eval/accuracy_1:0')
+
+        steps = 0
+        stats = {
+            'steps': [ ],
+            'acc_test': [ ],
+            'f_test': [ ]
+        }
+        pbar = pyprind.ProgBar(len(test_batch_names))
+        for batch_i in range(len(test_batch_names)):
+            for batch_features, batch_labels in load_train_batches(test_batch_names, batch_i, batch_size):
+                steps += 1
+                feed = {loaded_X: batch_features, loaded_y: batch_labels, loaded_keep_prob: 1.}
+                preds, test_acc = sess.run([ loaded_preds, loaded_acc ], feed_dict=feed)
+                test_fscore = fbeta_score(y_true=np.argmax(batch_labels, 1), y_pred=preds, beta=0.5)
+                stats[ 'steps' ].append(steps)
+                stats[ 'acc_test' ].append(test_acc)
+                stats[ 'f_test' ].append(test_fscore)
+            pbar.update()
+
+    return stats
+
 
 
 if __name__ == '__main__':
