@@ -214,8 +214,8 @@ def get_drug_names(ntl, drug_name_dict, n_other_drugs=n_other_drugs, random_stat
                         'Antipsychotic Drug Flag' ]
     imp_names = [ item for key in cats_to_flatten for item in drug_name_dict[ key ] ]
     non_op_names = others_picked + imp_names
-    op_names = np.unique(drug_name_dict[ 'Opioid Drug Flag' ].tolist())
-    non_op_names = np.unique(np.setdiff1d(non_op_names, op_names).tolist())
+    op_names = drug_name_dict[ 'Opioid Drug Flag' ]
+    non_op_names = np.setdiff1d(non_op_names, op_names).tolist()
     return non_op_names, op_names
 
 
