@@ -30,7 +30,7 @@ from sklearn.linear_model import SGDClassifier
 from sklearn.linear_model import PassiveAggressiveClassifier
 from sklearn.linear_model import Perceptron
 from sklearn.naive_bayes import MultinomialNB
-from sklearn.metrics import fbeta_score, accuracy_score
+from sklearn.metrics import fbeta_score, accuracy_score, confusion_matrix
 from sklearn.utils import shuffle
 
 import data_prep as prep
@@ -272,7 +272,7 @@ def get_test_score(results):
     return mean_scores, acc_test, f_test
 
 
-def eval_error(clf, val_features, val_labels, n_to_try=500):
+def eval_error(clf, val_features, val_labels, n_to_try=100):
     val_fscore = [ ]
     val_accuracy = [ ]
     try:
@@ -286,6 +286,20 @@ def eval_error(clf, val_features, val_labels, n_to_try=500):
         return None
 
     return np.mean(val_fscore), np.mean(val_accuracy)
+
+
+def eval_test_error(clf, test_batch_names):
+    test_fscore = [ ]
+    test_accuracy = [ ]
+    test_confusion = []
+    for i, batch_i in enumerate(test_batch_names):
+        for batch_features, batch_labels in load_train_batches(test_batch_names, i, batch_size):
+            pred_val = clf.predict(batch_features)
+            test_fscore.append(fbeta_score(batch_labels, pred_val, beta=.5))
+            test_accuracy.append(accuracy_score(batch_labels, pred_val))
+            test_confusion.append(confusion_matrix(batch_labels, pred_val))
+
+    return np.mean(test_fscore), np.mean(test_accuracy), np.sum(test_confusion, axis=0)
 
 
 def sgd_grid_search(train_batch_names, val_features, val_labels,
