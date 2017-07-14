@@ -7,6 +7,8 @@ is a daily phenomenon now; according to Centers for Disease Control and Preventi
 people are treated in emergency department every day for misusing prescription opioid drugs. 
 
 The major source of diverted opioids is physician prescription. However, opioids prescription to patients with acute pain and patients with chronic pain requires a careful distinction. As Opioid is regarded as one of the most effective drugs for the acute pain management, limiting its use for patients who are in urgent need of pain control, post surgical status, near end of life cancer patients, and other health crisis would not only be inhumane but also defeat its intended purpose. On the other hand, use of opioids for chronic non-malignant pain (CNMP) control has remained controversial for decades, and requires a closer look in regards to the current opioids health crisis. 
+
+
 This study attempted to build a predictive model of the likelihood of a healthcare provider prescribing opioids drugs to patients with chronic pain.  More specifically, we used a variety of classification techniques to predict whether or not a  health care provider dispense prescription opioids in long term (more than 84 days). 
 
 
@@ -36,11 +38,17 @@ improve the performance.
 | SGD-Log  | 0.8751  | 0.6661|
 | DNN  | 0.8782  | 0.6711|
 
-
+ The accuracy is not ‘perfect’ because we set the labels by categorizing continuous variable (average days of opioid supply) with an arbitrary threshold (84 days). 
+ 
 ## Discussion
 ![Alt text](https://github.com/JennyLeeStat/Opioid/blob/88256f0a2507a3c4d19664be77596cca6c128ec3/assets/estimated_prob.png)
 
-Many features came up for both models. Carisoprodol, diazepam, alprazolam, gabapentin,  pregabalin, hydroxychloroquine sulfate, cyclobenzaprine HCl, and tizanidine HCl were highly associated with the label based on both model. As we expected from the EDA, of medical specialties, pain management, interventional pain management, rheumatology, hematology, and hospice and palliative care were estimated the label is true with higher probability for both model. Among states, only Alaska came up within 25 for both models. 
+Many features came up for both models. Carisoprodol, diazepam, alprazolam, gabapentin,  pregabalin, 
+hydroxychloroquine sulfate, cyclobenzaprine HCl, and tizanidine HCl were highly associated with the 
+label based on both model. As we expected from the EDA, of medical specialties, pain management, 
+interventional pain management, rheumatology, hematology, and hospice and palliative care were 
+estimated that the label is true with higher probability by both model. 
+Among states, only Alaska came up within top 25 for both models. 
 
 
 
