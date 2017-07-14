@@ -107,7 +107,6 @@ def load_train_batches(train_batch_names, batch_id, batch_size, random_state=ran
     filename = train_batch_names[batch_id]
     features, labels = load_batches(filename)
     features, labels = shuffle(features, labels, random_state=random_state)
-
     return batch_features_labels(features, labels, batch_size)
 
 
@@ -144,7 +143,9 @@ def initialize_stats(partial_fit_classifiers):
             'acc_train': [],
             'acc_test': [],
             'f_train': [],
-            'f_test': []
+            'f_test': [],
+            'precision': [],
+            'recall': []
         }
         results[ clf_name ] = stats
     return results
@@ -271,7 +272,7 @@ def get_test_score(results):
     return mean_scores, acc_test, f_test
 
 
-def eval_error(clf, val_features, val_labels, n_to_try=100):
+def eval_error(clf, val_features, val_labels, n_to_try=500):
     val_fscore = [ ]
     val_accuracy = [ ]
     try:
@@ -380,13 +381,6 @@ def main():
 
 if __name__ == "__main__":
      main()
-
-#
-
-
-
-
-
 
 
 
