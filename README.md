@@ -37,6 +37,7 @@ improve the performance.
 | ------------- | ------------- |-------------|
 | SGD-Log  | 0.8751  | 0.6661|
 | DNN  | 0.8789  | 0.6749|
+| Benchmark| 0.1537 | 0.4759|
 
  The accuracy is not ‘perfect’ because we set the labels by categorizing continuous variable (average days of opioid supply) with an arbitrary threshold (84 days). 
  
@@ -52,4 +53,4 @@ Among states, only Alaska came up within top 25 for both models.
 
 
 
-A limitation of the study is that the dataset only includes a snapshot of the total population as beneficiaries of Medicare are elderly population of age greater than 65. 
+A limitation of the study is that the dataset only includes a snapshot of the total spopulation as beneficiaries of Medicare are elderly population of age greater than 65. 
